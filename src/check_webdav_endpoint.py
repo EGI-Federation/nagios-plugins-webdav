@@ -64,7 +64,6 @@ def getargs():
                                      "\t{0}, if only some tests passed\n".format(EXIT_SOME_FAIL) +
                                      "\t{0}, if all tests failed\n".format(EXIT_ALL_FAIL))
 
-    parser.add_argument('-v', '--vo', type=str, required=True, help="The Virtual Organization\n")
     parser.add_argument('-E', '--proxy', type=str, required=True, help="The path to the proxy certificate to use\n")
 
     parser.add_argument('-H', '--hostname', type=str, required=True, help="The hostname to query\n")
