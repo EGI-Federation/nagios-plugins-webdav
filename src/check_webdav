@@ -323,10 +323,14 @@ def filterhost(h):
         h = h[:h.find(":")]
 
 def main():
-    args = getargs()
-    logger = functools.partial(log, threshold=args.verbose)
-    tester = CurlTester(args, logger)
-    return tester.test()
-
+    try:
+        args = getargs()
+        logger = functools.partial(log, threshold=args.verbose)
+        tester = CurlTester(args, logger)
+        return tester.test()
+    except Exception, e:
+        print("An unknown error occured")
+        print(str(e))
+        return EX_UNKNOWN
 if __name__ == "__main__":
     sys.exit(main())
