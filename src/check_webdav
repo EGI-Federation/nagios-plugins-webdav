@@ -172,7 +172,7 @@ class Tester(object):
             item["host"] = self.args.hostname
             item["summary"] = r.short_output()
             item["details"] = r.long_output()
-            item["service"] = self.args.metric + "." + "webdav.HTTP-" + r.short_name.upper() + "-" + self.args.fqan
+            item["service"] = self.args.metric + "." + r.short_name.upper() + "-" + self.args.fqan
             publish.append(item)
 
         self.logger(V_DEBUG, str(publish) + "\n")
