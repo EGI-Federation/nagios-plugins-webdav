@@ -82,6 +82,9 @@ def getargs():
                         help="The certificate store to verify host credentials\n")
     parser.add_argument('-w', '--warning', type=int, default=4, help="Sets the warning threshold (seconds)\n")
     parser.add_argument('-t', '--timeout', type=int, default=10, help="Sets the timeout threshold (seconds)\n")
+    parser.add_argument('-m', '--metric', type=str, help="The metric prefix under which to publish the results in Nagios.\n"
+                        "Results will not be published if it isn't specified.")
+    parser.add_argument('-f', '--fqan', type=str, default="", help="The FQAN suffix to append to the end of the Nagios service name.\n")
 
     return parser.parse_args()
 
@@ -124,8 +127,8 @@ class TestResult(object):
 
     def short_output(self):
         if self.outcome == EX_CRITICAL:
-            return "{0}=fail".format(self.short_name)
-        return "{0}={1:.2f}".format(self.short_name, self.elapsed)
+            return "{0}=-1".format(self.short_name)
+        return "{0}={1:.2f}s".format(self.short_name, self.elapsed)
 
     def long_output(self):
         output = StringIO.StringIO()
@@ -160,6 +163,26 @@ class Tester(object):
         if outcomes.count(EX_WARNING) > 0:
             return EX_WARNING
         return EX_OK
+
+    def publish_results(self, results):
+        publish = []
+        for r in results:
+            item = {}
+            item["status"] = r.outcome
+            item["host"] = self.args.hostname
+            item["summary"] = r.short_output()
+            item["details"] = r.long_output()
+            item["service"] = self.args.metric + "." + "webdav.HTTP-" + r.short_name.upper() + "-" + self.args.fqan
+            publish.append(item)
+
+        self.logger(V_DEBUG, str(publish) + "\n")
+
+        try:
+            import gridmon.nagios.nagios
+            gridmon.nagios.nagios.publishPassiveResult(publish)
+        except Exception, e:
+            self.logger(V_DEBUG, "Error: could not publish passive result, an exception occured\n")
+            self.logger(V_DEBUG, "Exception text:  " + str(e) + "\n")
 
     def test(self):
         results = []
@@ -224,6 +247,8 @@ class Tester(object):
             self.logger(V_DEBUG, result.long_output())
 
         self.logger(V_MINIMAL, "\n")
+        if self.args.metric:
+            self.publish_results(results)
 
         return global_outcome
 
