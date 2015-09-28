@@ -110,10 +110,19 @@ class TestResult(object):
         self.failed = False
         self.messages = []
         self.warning = warning
+        self.header = None
+        self.writeout = None
 
     def validationFailure(self, msg):
         self.failed = True
         self.messages.append(msg)
+
+    def setheader(self, header):
+        self.header = header
+    def setwriteout(self, writeout):
+        self.writeout = writeout
+    def setdebugout(self, debugout):
+        self.debugout = debugout
 
     def diagnostic(self, msg):
         self.messages.append(msg)
@@ -146,6 +155,12 @@ class TestResult(object):
         s = code_to_str(self.outcome)
         out = "{0}: {1}".format(s, self.description)
         return out
+
+    def passive_long(self):
+        l = self.long_output()
+        if self.outcome == EX_CRITICAL or self.outcome == EX_UNKNOWN and self.debugout:
+            return l + self.debugout
+        return l
 
     def long_output(self):
         output = StringIO.StringIO()
@@ -180,7 +195,7 @@ class Tester(object):
             item = {}
             item["status"] = r.outcome
             item["host"] = self.args.hostname
-            item["details"] = r.long_output()
+            item["details"] = r.passive_long()
             item["summary"] = r.passive_short()
             item["service"] = self.args.metric + "-" + r.short_name.upper() + "-" + self.args.fqan
             publish.append(item)
@@ -279,11 +294,16 @@ class CurlTester(Tester):
         curl.setopt(pycurl.CAPATH, args.capath)
         curl.setopt(pycurl.URL, target)
 
-        curl.setopt(pycurl.WRITEFUNCTION, lambda x: None)
+        self.curlout = StringIO.StringIO()
+        curl.setopt(pycurl.WRITEFUNCTION, self.curlout.write)
 
-        if self.args.verbose >= V_ALL:
-            curl.setopt(curl.VERBOSE, 1)
-            curl.setopt(pycurl.DEBUGFUNCTION, lambda x, y: self.logger(V_ALL, y))
+        self.curlhdr = StringIO.StringIO()
+        curl.setopt(pycurl.HEADERFUNCTION, self.curlhdr.write)
+
+        self.curldebug = StringIO.StringIO()
+        curl.setopt(curl.VERBOSE, 1)
+        curl.setopt(pycurl.DEBUGFUNCTION, lambda x, y: self.curldebug.write(str(x) + y))
+
         return curl
     def put(self, target):
         curl = self.getcurl(target)
@@ -297,12 +317,10 @@ class CurlTester(Tester):
     def options(self, target):
         curl = self.getcurl(target)
         curl.setopt(pycurl.CUSTOMREQUEST, "OPTIONS")
-        buffer = StringIO.StringIO()
-        curl.setopt(curl.HEADERFUNCTION, buffer.write)
         result = self.perform(curl)
 
         allows = None
-        for line in buffer.getvalue().split("\n"):
+        for line in self.curlhdr.getvalue().split("\n"):
             if line.startswith("Allow:"):
                 allows = line
 
@@ -327,11 +345,8 @@ class CurlTester(Tester):
         return self.perform(curl)
     def get(self, target):
         curl = self.getcurl(target)
-        buffer = StringIO.StringIO()
-        curl.setopt(curl.WRITEFUNCTION, buffer.write)
-
         result = self.perform(curl)
-        if buffer.getvalue() != __TEST_FILE__:
+        if self.curlout.getvalue() != __TEST_FILE__:
             result.validationFailure("ERROR: The file downloaded not the same as the file uploaded!")
         return result
     def perform(self, curl):
@@ -341,6 +356,10 @@ class CurlTester(Tester):
             status = curl.getinfo(pycurl.HTTP_CODE)
             elapsed = curl.getinfo(pycurl.TOTAL_TIME)
             result = TestResult(status, elapsed, self.args.warning)
+
+            result.setheader(self.curlhdr.getvalue())
+            result.setwriteout(self.curlout.getvalue())
+            result.setdebugout(self.curldebug.getvalue())
             return result
         except Exception, e:
             result = TestResult(0, 0, self.args.warning)
