@@ -38,6 +38,7 @@ import functools
 import argparse
 import StringIO
 import random
+import traceback
 
 __version__ = "0.1"
 
@@ -55,6 +56,16 @@ EX_OK       = 0
 EX_WARNING  = 1
 EX_CRITICAL = 2
 EX_UNKNOWN  = 3
+
+def code_to_str(code):
+    if code == EX_CRITICAL:
+        return "FAILURE"
+    elif code == EX_WARNING:
+        return "SLOW"
+    elif code == EX_OK:
+        return "OK"
+    elif code == EX_UNKNOWN:
+        return "UNKNOWN"
 
 def getargs():
     class CustomFormatter(argparse.ArgumentDefaultsHelpFormatter, argparse.RawTextHelpFormatter):
@@ -107,8 +118,9 @@ class TestResult(object):
     def diagnostic(self, msg):
         self.messages.append(msg)
 
-    def finalize(self, name, expected_status=None):
+    def finalize(self, name, description, expected_status=None):
         self.name = name
+        self.description = description
         self.short_name = name.lower().replace(" ", "_").replace("-", "_")
         self.expected_status = expected_status
         self.outcome = self.determine_outcome()
@@ -130,16 +142,14 @@ class TestResult(object):
             return "{0}=-1".format(self.short_name)
         return "{0}={1:.2f}s".format(self.short_name, self.elapsed)
 
+    def passive_short(self):
+        s = code_to_str(self.outcome)
+        out = "{0}: {1}".format(s, self.description)
+        return out
+
     def long_output(self):
         output = StringIO.StringIO()
-        if self.outcome == EX_CRITICAL:
-            s = "FAILURE"
-        elif self.outcome == EX_WARNING:
-            s = "SLOW"
-        elif self.outcome == EX_OK:
-            s = "SUCCESS"
-        elif self.outcome == EX_UNKNOWN:
-            s = "UNKNOWN"
+        s = code_to_str(self.outcome)
 
         output.write("{0:20} {1:5} ({2:<10} sec)   {3}".format(self.name, self.status, self.elapsed, s))
         output.write("\n")
@@ -170,9 +180,9 @@ class Tester(object):
             item = {}
             item["status"] = r.outcome
             item["host"] = self.args.hostname
-            item["summary"] = r.short_output()
             item["details"] = r.long_output()
-            item["service"] = self.args.metric + "." + r.short_name.upper() + "-" + self.args.fqan
+            item["summary"] = r.passive_short()
+            item["service"] = self.args.metric + "-" + r.short_name.upper() + "-" + self.args.fqan
             publish.append(item)
 
         self.logger(V_DEBUG, str(publish) + "\n")
@@ -190,41 +200,41 @@ class Tester(object):
         # PUT
         target = self.path + __TEST_FILENAME__ + str(random.randint(0, __MAX_RND__))
         results.append(self.put(target))
-        results[-1].finalize("PUT")
+        results[-1].finalize("PUT", "PUT a file")
 
         # GET
         results.append(self.get(target))
-        results[-1].finalize("GET")
+        results[-1].finalize("GET", "GET a file")
 
         # OPTIONS
         results.append(self.options(target))
-        results[-1].finalize("OPTIONS")
+        results[-1].finalize("OPTIONS", "OPTIONS on file")
 
         # PUT file again, expecting this to fail
         results.append(self.put(target))
-        results[-1].finalize("PUT on same path", 409)
+        results[-1].finalize("PUT on same path", "PUT on existing path, should return 409", 409)
 
         # MOVE
         source = target
         target = target + "_moved"
         results.append(self.move(source, target))
-        results[-1].finalize("MOVE")
+        results[-1].finalize("MOVE", "MOVE file to another path")
 
         # HEAD
         results.append(self.head(target))
-        results[-1].finalize("HEAD")
+        results[-1].finalize("HEAD", "HEAD on a file")
 
         # HEAD on moved source, expecting to fail
         results.append(self.head(source))
-        results[-1].finalize("HEAD on non-existent", 404)
+        results[-1].finalize("HEAD on non-existent", "HEAD on a file that does not exist, should return 404", 404)
 
         # PROPFIND
         results.append(self.propfind(target))
-        results[-1].finalize("PROPFIND")
+        results[-1].finalize("PROPFIND", "PROPFIND on a file")
 
         # DELETE
         results.append(self.delete(target))
-        results[-1].finalize("DELETE")
+        results[-1].finalize("DELETE", "DELETE a file")
 
         global_outcome = self.determine_exit_code(results)
         if global_outcome == EX_OK:
@@ -355,7 +365,7 @@ def main():
         return tester.test()
     except Exception, e:
         print("An unknown error occured")
-        print(str(e))
+        print(traceback.format_exc())
         return EX_UNKNOWN
 if __name__ == "__main__":
     sys.exit(main())
