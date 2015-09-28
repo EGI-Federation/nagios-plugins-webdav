@@ -67,6 +67,13 @@ def code_to_str(code):
     elif code == EX_UNKNOWN:
         return "UNKNOWN"
 
+def http_status_to_explanation(status):
+    if status == 404:
+        return "file/path not found (are you using an incorrect path?)"
+    elif status == 403:
+        return "forbidden (are you using a valid certificate?)"
+    return "status {0}".format(status)
+
 def getargs():
     class CustomFormatter(argparse.ArgumentDefaultsHelpFormatter, argparse.RawTextHelpFormatter):
         pass
@@ -112,6 +119,7 @@ class TestResult(object):
         self.warning = warning
         self.header = None
         self.writeout = None
+        self.debugout = None
 
     def validationFailure(self, msg):
         self.failed = True
@@ -127,14 +135,19 @@ class TestResult(object):
     def diagnostic(self, msg):
         self.messages.append(msg)
 
-    def finalize(self, name, description, expected_status=None):
+    def finalize(self, name, description, putfailed, expected_status=None):
         self.name = name
         self.description = description
         self.short_name = name.lower().replace(" ", "_").replace("-", "_")
         self.expected_status = expected_status
+        self.putfailed = putfailed
         self.outcome = self.determine_outcome()
 
     def determine_outcome(self):
+        if self.putfailed:
+            self.diagnostic("PUT has failed, result of this test unknown")
+            return EX_UNKNOWN
+
         if self.failed:
             return EX_CRITICAL
         if self.expected_status != None and self.status != self.expected_status:
@@ -147,18 +160,22 @@ class TestResult(object):
             return EX_OK
 
     def short_output(self):
-        if self.outcome == EX_CRITICAL:
-            return "{0}=-1".format(self.short_name)
+        if self.outcome == EX_CRITICAL or self.outcome == EX_UNKNOWN:
+            return ""
         return "{0}={1:.2f}s".format(self.short_name, self.elapsed)
 
     def passive_short(self):
         s = code_to_str(self.outcome)
         out = "{0}: {1}".format(s, self.description)
+        if self.outcome == EX_CRITICAL:
+            out += " - {0}".format(http_status_to_explanation(self.status))
+        if self.outcome == EX_UNKNOWN and self.putfailed:
+            out += " (initial PUT failed, bailing out)"
         return out
 
     def passive_long(self):
         l = self.long_output()
-        if self.outcome == EX_CRITICAL or self.outcome == EX_UNKNOWN and self.debugout:
+        if (self.outcome == EX_CRITICAL or self.outcome == EX_UNKNOWN) and self.debugout:
             return l + self.debugout
         return l
 
@@ -212,44 +229,47 @@ class Tester(object):
     def test(self):
         results = []
 
-        # PUT
         target = self.path + __TEST_FILENAME__ + str(random.randint(0, __MAX_RND__))
+        target2 = target + "_moved"
+
+        # PUT
         results.append(self.put(target))
-        results[-1].finalize("PUT", "PUT a file")
+        results[-1].finalize("PUT", "PUT a file", False)
+        putfailed = results[-1].outcome == EX_CRITICAL
 
         # GET
         results.append(self.get(target))
-        results[-1].finalize("GET", "GET a file")
+        results[-1].finalize("GET", "GET a file", putfailed)
 
         # OPTIONS
         results.append(self.options(target))
-        results[-1].finalize("OPTIONS", "OPTIONS on file")
+        results[-1].finalize("OPTIONS", "OPTIONS on file", putfailed)
 
         # PUT file again, expecting this to fail
         results.append(self.put(target))
-        results[-1].finalize("PUT on same path", "PUT on existing path, should return 409", 409)
+        results[-1].finalize("PUT on same path", "PUT on existing path, should return 409", putfailed, 409)
 
         # MOVE
         source = target
         target = target + "_moved"
         results.append(self.move(source, target))
-        results[-1].finalize("MOVE", "MOVE file to another path")
+        results[-1].finalize("MOVE", "MOVE file to another path", putfailed)
 
         # HEAD
         results.append(self.head(target))
-        results[-1].finalize("HEAD", "HEAD on a file")
+        results[-1].finalize("HEAD", "HEAD on a file", putfailed)
 
         # HEAD on moved source, expecting to fail
         results.append(self.head(source))
-        results[-1].finalize("HEAD on non-existent", "HEAD on a file that does not exist, should return 404", 404)
+        results[-1].finalize("HEAD on non-existent", "HEAD on a file that does not exist, should return 404", putfailed, 404)
 
         # PROPFIND
         results.append(self.propfind(target))
-        results[-1].finalize("PROPFIND", "PROPFIND on a file")
+        results[-1].finalize("PROPFIND", "PROPFIND on a file", putfailed)
 
         # DELETE
         results.append(self.delete(target))
-        results[-1].finalize("DELETE", "DELETE a file")
+        results[-1].finalize("DELETE", "DELETE a file", putfailed)
 
         global_outcome = self.determine_exit_code(results)
         if global_outcome == EX_OK:
@@ -359,7 +379,9 @@ class CurlTester(Tester):
 
             result.setheader(self.curlhdr.getvalue())
             result.setwriteout(self.curlout.getvalue())
-            result.setdebugout(self.curldebug.getvalue())
+
+            if self.args.verbose >= V_ALL:
+                result.setdebugout(self.curldebug.getvalue())
             return result
         except Exception, e:
             result = TestResult(0, 0, self.args.warning)
