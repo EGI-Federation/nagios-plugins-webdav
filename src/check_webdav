@@ -239,8 +239,8 @@ class Tester(object):
         self.logger(V_EXTENDED, " | ")
         for result in results:
             self.logger(V_EXTENDED, result.short_output())
-            self.logger(V_EXTENDED, " ")
-        self.logger(V_DEBUG, "|\n")
+            self.logger(V_EXTENDED, ";; ")
+        self.logger(V_DEBUG, "\n")
         self.logger(V_DEBUG, "URI " + str(source) + "\n")
 
         for result in results:
