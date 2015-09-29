@@ -105,6 +105,7 @@ def getargs():
     parser.add_argument('-m', '--metric', type=str, help="The metric prefix under which to publish the results in Nagios.\n"
                         "Results will not be published if it isn't specified.")
     parser.add_argument('-f', '--fqan', type=str, default="", help="The FQAN suffix to append to the end of the Nagios service name.\n")
+    parser.add_argument('--version', action='version', version=str(__version__))
 
     args = parser.parse_args()
 
