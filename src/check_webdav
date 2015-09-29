@@ -78,8 +78,10 @@ def getargs():
     class CustomFormatter(argparse.ArgumentDefaultsHelpFormatter, argparse.RawTextHelpFormatter):
         pass
 
+    helptext = "Use either --uri or (--hostname, --port, and --path) to specify the target."
+
     parser = argparse.ArgumentParser(formatter_class=CustomFormatter,
-                                     description="Checks the WebDAV capabilities of an endpoint",
+                                     description="Checks the WebDAV capabilities of an endpoint.\n" + helptext,
                                      epilog="The script will return the following exit code:\n"
                                      "\t{0}, if all tests passed\n".format(EX_OK) +
                                      "\t{0}, if all tests passed but some were over the warning threshold\n".format(EX_WARNING) +
@@ -87,10 +89,10 @@ def getargs():
                                      "\t{0}, if status is unknown\n".format(EX_UNKNOWN))
 
     parser.add_argument('-E', '--proxy', type=str, required=True, help="The path to the proxy certificate to use\n")
-
-    parser.add_argument('-H', '--hostname', type=str, required=True, help="The hostname to query\n")
+    parser.add_argument('-H', '--hostname', type=str, help="The hostname to query\n")
     parser.add_argument('-p', '--port', type=int, default=443, help="The server port to use\n")
-    parser.add_argument('-P', '--path', type=str, required=True, help="The target server path to test\n")
+    parser.add_argument('-P', '--path', type=str, help="The target server path to test\n")
+    parser.add_argument('-u', '--uri', type=str, help="The target URI to test")
     parser.add_argument('-v', '--verbose', action='count', default=0,
                         help="Verbosity levels:\n"
                         " -v   -> display some information about every test\n"
@@ -104,7 +106,26 @@ def getargs():
                         "Results will not be published if it isn't specified.")
     parser.add_argument('-f', '--fqan', type=str, default="", help="The FQAN suffix to append to the end of the Nagios service name.\n")
 
-    return parser.parse_args()
+    args = parser.parse_args()
+
+    # This circus is needed because python's argparse doesn't support
+    # mutually exlusive sets of options..
+    if args.hostname is None and args.uri is None:
+        print("Error: No target specified. " + helptext)
+        sys.exit(-1)
+    if args.uri is not None and (args.hostname is not None or args.path is not None):
+        print("Error: " + helptext)
+        sys.exit(-1)
+    if args.hostname is not None and args.path is None:
+        print("Error: no path specified. " + helptext)
+        sys.exit(-1)
+
+    if args.uri is None:
+        args.uri = "https://{0}:{1}/{2}/".format(args.hostname, args.port, args.path)
+    if not args.uri.endswith("/"):
+        args.uri += "/"
+
+    return args
 
 def log(level, message, threshold=None):
     if level <= threshold:
@@ -194,7 +215,8 @@ class TestResult(object):
 class Tester(object):
     def __init__(self, args, logger):
         self.args = args
-        self.path = "https://{0}:{1}/{2}/".format(args.hostname, args.port, args.path)
+        # self.path = "https://{0}:{1}/{2}/".format(args.hostname, args.port, args.path)
+        self.path = args.uri
         self.logger = logger
 
     def determine_exit_code(self, results):
