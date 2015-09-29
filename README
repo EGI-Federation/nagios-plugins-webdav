@@ -1,0 +1,4 @@
+# Nagios WebDAV plugin
+Nagios plugin to monitor the status of the WebDAV capabilities of an endpoint
+
+If you have any questions regarding the use of this software, have a look at the [documentation](https://twiki.cern.ch/twiki/bin/view/LCG/HTTPTFSAMProbe) or sent an email to dpm-users-foum@cern.ch.
