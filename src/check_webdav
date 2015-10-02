@@ -39,6 +39,7 @@ import argparse
 import StringIO
 import random
 import traceback
+import urlparse
 
 __version__ = "0.1"
 
@@ -72,6 +73,8 @@ def http_status_to_explanation(status):
         return "file/path not found (are you using an incorrect path?)"
     elif status == 403:
         return "forbidden (are you using a valid certificate?)"
+    elif status == 0:
+        return "connection failure (service down? SSL not configured properly?)"
     return "status {0}".format(status)
 
 def getargs():
@@ -88,9 +91,9 @@ def getargs():
                                      "\t{0}, if some tests failed\n".format(EX_CRITICAL) +
                                      "\t{0}, if status is unknown\n".format(EX_UNKNOWN))
 
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument('-H', '--hostname', type=str, help="The hostname to query\n")
-    group.add_argument('-u', '--uri', type=str, help="The target URI to test")
+    # group = parser.add_mutually_exclusive_group(required=True)
+    parser.add_argument('-H', '--hostname', type=str, help="The hostname to query\n")
+    parser.add_argument('-u', '--uri', type=str, help="The target URI to test")
 
     parser.add_argument('-E', '--proxy', type=str, required=True, help="The path to the proxy certificate to use\n")
     parser.add_argument('-p', '--port', type=int, default=443, help="The server port to use\n")
@@ -111,8 +114,19 @@ def getargs():
 
     args = parser.parse_args()
 
-    if args.hostname is not None and args.path is None:
+    if args.hostname is None and args.uri is None:
+        parser.error("neither --hostname nor --uri was given. " + helptext)
+
+    if args.hostname is not None and args.path is None and args.uri is None:
         parser.error("no path specified. Using --path is mandatory with --hostname. " + helptext)
+
+    # both --uri and --hostname were given.. make sure they match
+    # Necessary because most nagios scripts are called with -H in
+    # addition to all other arguments.
+    if args.hostname is not None and args.uri is not None:
+        uri = urlparse.urlparse(args.uri)
+        if uri.hostname != args.hostname:
+            parser.error("hostname in --uri does not match --hostname")
 
     if args.uri is None:
         args.uri = "https://{0}:{1}/{2}/".format(args.hostname, args.port, args.path)
@@ -125,11 +139,22 @@ def log(level, message, threshold=None):
     if level <= threshold:
         print(message, end="")
 
+class SingleTest:
+    def __init__(self, name, description, method, args, expected=None):
+        self.name = name
+        self.description = description
+        self.method = method
+        self.args = args
+        self.expected = expected
+    def run(self):
+        return self.method(*self.args)
+
 class TestResult(object):
     def __init__(self, status, elapsed, warning):
         self.status = status
         self.elapsed = elapsed
         self.failed = False
+        self.unknown = False
         self.messages = []
         self.warning = warning
         self.header = None
@@ -138,6 +163,10 @@ class TestResult(object):
 
     def validationFailure(self, msg):
         self.failed = True
+        self.messages.append(msg)
+
+    def unknownFailure(self, msg):
+        self.unknown = True
         self.messages.append(msg)
 
     def setheader(self, header):
@@ -150,19 +179,16 @@ class TestResult(object):
     def diagnostic(self, msg):
         self.messages.append(msg)
 
-    def finalize(self, name, description, putfailed, expected_status=None):
+    def finalize(self, name, description, expected_status=None):
         self.name = name
         self.description = description
         self.short_name = name.lower().replace(" ", "_").replace("-", "_")
         self.expected_status = expected_status
-        self.putfailed = putfailed
         self.outcome = self.determine_outcome()
 
     def determine_outcome(self):
-        if self.putfailed:
-            self.diagnostic("PUT has failed, result of this test unknown")
+        if self.unknown:
             return EX_UNKNOWN
-
         if self.failed:
             return EX_CRITICAL
         if self.expected_status != None and self.status != self.expected_status:
@@ -184,8 +210,6 @@ class TestResult(object):
         out = "{0}: {1}".format(s, self.description)
         if self.outcome == EX_CRITICAL:
             out += " - {0}".format(http_status_to_explanation(self.status))
-        if self.outcome == EX_UNKNOWN and self.putfailed:
-            out += " (initial PUT failed, bailing out)"
         return out
 
     def passive_long(self):
@@ -215,7 +239,6 @@ class Tester(object):
 
     def determine_exit_code(self, results):
         outcomes = [x.outcome for x in results]
-        size = len(outcomes)
         if outcomes.count(EX_CRITICAL) > 0:
             return EX_CRITICAL
         if outcomes.count(EX_WARNING) > 0:
@@ -245,48 +268,35 @@ class Tester(object):
     def test(self):
         results = []
 
-        target = self.path + __TEST_FILENAME__ + str(random.randint(0, __MAX_RND__))
-        target2 = target + "_moved"
+        target1 = self.path + __TEST_FILENAME__ + str(random.randint(0, __MAX_RND__))
+        target2 = target1 + "_moved"
 
-        # PUT
-        results.append(self.put(target))
-        results[-1].finalize("PUT", "PUT a file", False)
-        putfailed = results[-1].outcome == EX_CRITICAL
+        # initial PUT request - if this fails, we're doomed
+        results.append(self.put(target1))
+        results[-1].finalize("PUT", "PUT a file")
+        putfailed = results[-1].outcome != EX_OK
 
-        # GET
-        results.append(self.get(target))
-        results[-1].finalize("GET", "GET a file", putfailed)
+        alltests = [
+            SingleTest("GET", "GET a file", self.get, [target1]),
+            SingleTest("OPTIONS", "OPTIONS on file", self.options, [target1]),
+            SingleTest("PUT on same path", "PUT on existing path, should return 409", self.put, [target1], expected=409),
+            SingleTest("MOVE", "MOVE file to another path", self.move, [target1, target2]),
+            SingleTest("HEAD", "HEAD on a file", self.head, [target2]),
+            SingleTest("HEAD on non-existent", "HEAD on a file that does not exist, should return 404", self.head, [target1], expected=404),
+            SingleTest("PROPFIND", "PROPFIND a file", self.propfind, [target2]),
+            SingleTest("DELETE", "DELETE a file", self.delete, [target2])
+        ]
 
-        # OPTIONS
-        results.append(self.options(target))
-        results[-1].finalize("OPTIONS", "OPTIONS on file", putfailed)
+        # run the rest of the tests
+        for t in alltests:
+            if putfailed:
+                results.append(TestResult(0, 0, 0))
+                results[-1].unknownFailure("PUT failed - bailing out")
+            else:
+                results.append(t.run())
+            results[-1].finalize(t.name, t.description, t.expected)
 
-        # PUT file again, expecting this to fail
-        results.append(self.put(target))
-        results[-1].finalize("PUT on same path", "PUT on existing path, should return 409", putfailed, 409)
-
-        # MOVE
-        source = target
-        target = target + "_moved"
-        results.append(self.move(source, target))
-        results[-1].finalize("MOVE", "MOVE file to another path", putfailed)
-
-        # HEAD
-        results.append(self.head(target))
-        results[-1].finalize("HEAD", "HEAD on a file", putfailed)
-
-        # HEAD on moved source, expecting to fail
-        results.append(self.head(source))
-        results[-1].finalize("HEAD on non-existent", "HEAD on a file that does not exist, should return 404", putfailed, 404)
-
-        # PROPFIND
-        results.append(self.propfind(target))
-        results[-1].finalize("PROPFIND", "PROPFIND on a file", putfailed)
-
-        # DELETE
-        results.append(self.delete(target))
-        results[-1].finalize("DELETE", "DELETE a file", putfailed)
-
+        # print all output
         global_outcome = self.determine_exit_code(results)
         if global_outcome == EX_OK:
             self.logger(V_MINIMAL, "OK: all tests successful")
@@ -302,7 +312,7 @@ class Tester(object):
             self.logger(V_EXTENDED, result.short_output())
             self.logger(V_EXTENDED, ";; ")
         self.logger(V_DEBUG, "\n")
-        self.logger(V_DEBUG, "URI " + str(source) + "\n")
+        self.logger(V_DEBUG, "URI " + str(target1) + "\n")
 
         for result in results:
             self.logger(V_DEBUG, result.long_output())
@@ -316,6 +326,7 @@ class Tester(object):
 class CurlTester(Tester):
     def __init__(self, args, logger):
         Tester.__init__(self, args, logger)
+        self.insecure = False
     def getcurl(self, target):
         args = self.args
         curl = pycurl.Curl()
@@ -329,6 +340,7 @@ class CurlTester(Tester):
         curl.setopt(pycurl.SSLCERT, args.proxy)
         curl.setopt(pycurl.CAPATH, args.capath)
         curl.setopt(pycurl.URL, target)
+        curl.setopt(pycurl.SSL_VERIFYPEER, not self.insecure)
 
         self.curlout = StringIO.StringIO()
         curl.setopt(pycurl.WRITEFUNCTION, self.curlout.write)
