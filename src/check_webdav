@@ -274,7 +274,7 @@ class Tester(object):
         # initial PUT request - if this fails, we're doomed
         results.append(self.put(target1))
         results[-1].finalize("PUT", "PUT a file")
-        putfailed = results[-1].outcome != EX_OK
+        putfailed = results[-1].outcome == EX_CRITICAL or results[-1].outcome == EX_UNKNOWN
 
         alltests = [
             SingleTest("GET", "GET a file", self.get, [target1]),
