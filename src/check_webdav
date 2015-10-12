@@ -93,6 +93,13 @@ def get_vo(proxy):
     stdout, stderr = process.communicate()
     return stdout
 
+credentials = ""
+def get_credentials_information(proxy):
+    process = subprocess.Popen(["voms-proxy-info", "-file", proxy, "-all"],
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    stdout, stderr = process.communicate()
+    return stdout
+
 def getargs():
     class CustomFormatter(argparse.ArgumentDefaultsHelpFormatter, argparse.RawTextHelpFormatter):
         pass
@@ -174,6 +181,7 @@ class TestResult(object):
         self.messages = []
         self.warning = warning
         self.history = None
+        self.target = None
 
     def validationFailure(self, msg):
         self.failed = True
@@ -222,20 +230,32 @@ class TestResult(object):
             out += " - {0}".format(http_status_to_explanation(self.status))
         return out
 
-    def long_output(self, escapeHTML=False):
+    def long_output(self, printHTML=False):
+        if printHTML:
+            indent = "&nbsp;"*4
+        else:
+            indent = " "*4
         output = StringIO.StringIO()
         s = code_to_str(self.outcome)
 
         output.write("{0:20} {1:5} ({2:<10} sec)   {3}\n".format(self.name, self.status, self.elapsed, s))
         for i in self.messages:
-            output.write(add_prefix(i, "   "))
+            output.write(add_prefix(i,indent))
+
+        if self.outcome == EX_CRITICAL:
+            if self.target:
+                output.write(add_prefix("Target URL: " + self.target + "\n", indent))
+            output.write(add_prefix("Credentials:\n", indent))
+            output.write(add_prefix(credentials, indent*2))
 
         if (self.outcome == EX_CRITICAL or self.outcome == EX_UNKNOWN) and self.history:
-            output.write("    The request/response history follows.\n\n")
-            if escapeHTML:
-                output.write(add_prefix(cgi.escape(self.history), "    "))
+            output.write(add_prefix("Server response: {0}\n".format(http_status_to_explanation(self.status)), indent))
+            output.write(add_prefix("Debugging information: the history of all performed requests and "
+                                    "received responses during the execution of this test follows.\n", indent))
+            if printHTML:
+                output.write(add_prefix(cgi.escape(self.history), indent))
             else:
-                output.write(add_prefix(self.history, "    "))
+                output.write(add_prefix(self.history, indent))
 
         return output.getvalue()
 
@@ -260,7 +280,7 @@ class Tester(object):
             item = {}
             item["status"] = r.outcome
             item["host"] = self.args.hostname
-            item["details"] = r.long_output(escapeHTML=True)
+            item["details"] = r.long_output(printHTML=True)
             item["summary"] = r.passive_short()
             item["service"] = self.args.metric + "-" + r.short_name.upper() + "-" + self.args.fqan
             publish.append(item)
@@ -325,13 +345,12 @@ class Tester(object):
             self.logger(V_EXTENDED, ";; ")
         self.logger(V_DEBUG, "\n")
         self.logger(V_DEBUG, "URI: " + str(target1) + "\n")
-        self.logger(V_DEBUG, "Proxy VO: " + get_vo(self.args.proxy) + "\n")
 
         # if running inside nagios, escape all HTML
-        escapeHTML = "NAGIOS_ARG1" in os.environ
+        printHTML = "NAGIOS_ARG1" in os.environ
 
         for result in results:
-            self.logger(V_DEBUG, result.long_output(escapeHTML=escapeHTML))
+            self.logger(V_DEBUG, result.long_output(printHTML=printHTML))
 
         self.logger(V_MINIMAL, "\n")
         if self.args.metric:
@@ -355,6 +374,7 @@ class CurlTester(Tester):
         curl.setopt(pycurl.CAINFO, args.proxy)
         curl.setopt(pycurl.SSLCERT, args.proxy)
         curl.setopt(pycurl.CAPATH, args.capath)
+        curl.____mytarget  = target # pycurl does not support getting the URL back..
         curl.setopt(pycurl.URL, target)
         curl.setopt(pycurl.SSL_VERIFYPEER, not self.insecure)
 
@@ -434,9 +454,11 @@ class CurlTester(Tester):
             result = TestResult(status, elapsed, self.args.warning)
 
             result.sethistory(self.history.getvalue())
+            result.target = curl.____mytarget
             return result
         except Exception, e:
             result = TestResult(0, 0, self.args.warning)
+            result.target = curl.____mytarget
             result.validationFailure("Curl exception: " + str(e))
             return result
 
@@ -453,6 +475,8 @@ def filterhost(h):
 def main():
     try:
         args = getargs()
+        global credentials
+        credentials = get_credentials_information(args.proxy)
         logger = functools.partial(log, threshold=args.verbose)
         tester = CurlTester(args, logger)
         return tester.test()
