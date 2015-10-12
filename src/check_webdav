@@ -88,9 +88,10 @@ def add_prefix(string, prefix):
 
 # returns the vo of the provided proxy
 def get_vo(proxy):
-    # vo = subprocess.check_output("voms-proxy-info -file {0} -vo".format(proxy))
-    return "dteam"
-    return vo
+    process = subprocess.Popen(["voms-proxy-info", "-file", proxy, "-vo"],
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    stdout, stderr = process.communicate()
+    return stdout
 
 def getargs():
     class CustomFormatter(argparse.ArgumentDefaultsHelpFormatter, argparse.RawTextHelpFormatter):
@@ -323,8 +324,8 @@ class Tester(object):
             self.logger(V_EXTENDED, result.short_output())
             self.logger(V_EXTENDED, ";; ")
         self.logger(V_DEBUG, "\n")
-        self.logger(V_DEBUG, "URI " + str(target1) + "\n")
-        self.logger(V_DEBUG, "Proxy VO " + str(get_vo(self.args.proxy)) + "\n")
+        self.logger(V_DEBUG, "URI: " + str(target1) + "\n")
+        self.logger(V_DEBUG, "Proxy VO: " + get_vo(self.args.proxy) + "\n")
 
         # if running inside nagios, escape all HTML
         escapeHTML = "NAGIOS_ARG1" in os.environ
