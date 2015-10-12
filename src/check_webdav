@@ -22,8 +22,7 @@
 #
 # DESCRIPTION : Checks the webdav interface to an endpoint
 #
-# AUTHORS :     Ivan Calvet <ivan.calvet@cern.ch>
-#               Georgios Bitzes <georgios.bitzes@cern.ch>
+# AUTHORS :     Georgios Bitzes <georgios.bitzes@cern.ch>
 #
 ##############################################################################
 
@@ -40,6 +39,7 @@ import StringIO
 import random
 import traceback
 import urlparse
+import cgi
 
 __version__ = "0.1"
 
@@ -70,9 +70,11 @@ def code_to_str(code):
 
 def http_status_to_explanation(status):
     if status == 404:
-        return "file/path not found (are you using an incorrect path?)"
+        return "404 file/path not found (are you using an incorrect path?)"
     elif status == 403:
-        return "forbidden (are you using a valid certificate?)"
+        return "403 forbidden (are you using a valid certificate and path?)"
+    elif status == 401:
+        return "401 unauthorized (are you using a valid certificate and path?)"
     elif status == 0:
         return "connection failure (service down? SSL not configured properly?)"
     return "status {0}".format(status)
@@ -105,8 +107,8 @@ def getargs():
                         " -vvv -> print server responses and headers, only for debugging\n")
     parser.add_argument('--capath', type=str, default="/etc/grid-security/certificates",
                         help="The certificate store to verify host credentials\n")
-    parser.add_argument('-w', '--warning', type=int, default=4, help="Sets the warning threshold (seconds)\n")
-    parser.add_argument('-t', '--timeout', type=int, default=10, help="Sets the timeout threshold (seconds)\n")
+    parser.add_argument('-w', '--warning', type=int, default=10, help="Sets the warning threshold (seconds)\n")
+    parser.add_argument('-t', '--timeout', type=int, default=30, help="Sets the timeout threshold (seconds)\n")
     parser.add_argument('-m', '--metric', type=str, help="The metric prefix under which to publish the results in Nagios.\n"
                         "Results will not be published if it isn't specified.")
     parser.add_argument('-f', '--fqan', type=str, default="", help="The FQAN suffix to append to the end of the Nagios service name.\n")
@@ -157,9 +159,7 @@ class TestResult(object):
         self.unknown = False
         self.messages = []
         self.warning = warning
-        self.header = None
-        self.writeout = None
-        self.debugout = None
+        self.history = None
 
     def validationFailure(self, msg):
         self.failed = True
@@ -169,12 +169,8 @@ class TestResult(object):
         self.unknown = True
         self.messages.append(msg)
 
-    def setheader(self, header):
-        self.header = header
-    def setwriteout(self, writeout):
-        self.writeout = writeout
-    def setdebugout(self, debugout):
-        self.debugout = debugout
+    def sethistory(self, history):
+        self.history = history
 
     def diagnostic(self, msg):
         self.messages.append(msg)
@@ -212,21 +208,21 @@ class TestResult(object):
             out += " - {0}".format(http_status_to_explanation(self.status))
         return out
 
-    def passive_long(self):
-        l = self.long_output()
-        if (self.outcome == EX_CRITICAL or self.outcome == EX_UNKNOWN) and self.debugout:
-            return l + self.debugout
-        return l
-
-    def long_output(self):
+    def long_output(self, escapeHTML=False):
         output = StringIO.StringIO()
         s = code_to_str(self.outcome)
 
-        output.write("{0:20} {1:5} ({2:<10} sec)   {3}".format(self.name, self.status, self.elapsed, s))
-        output.write("\n")
+        output.write("{0:20} {1:5} ({2:<10} sec)   {3}\n".format(self.name, self.status, self.elapsed, s))
         for i in self.messages:
             output.write(i)
             output.write("\n")
+
+        if (self.outcome == EX_CRITICAL or self.outcome == EX_UNKNOWN) and self.history:
+            output.write("The request/response history follows.\n\n")
+            if escapeHTML:
+                output.write(cgi.escape(self.history))
+            else:
+                output.write(self.history)
 
         return output.getvalue()
 
@@ -251,12 +247,10 @@ class Tester(object):
             item = {}
             item["status"] = r.outcome
             item["host"] = self.args.hostname
-            item["details"] = r.passive_long()
+            item["details"] = r.long_output(escapeHTML=True)
             item["summary"] = r.passive_short()
             item["service"] = self.args.metric + "-" + r.short_name.upper() + "-" + self.args.fqan
             publish.append(item)
-
-        self.logger(V_DEBUG, str(publish) + "\n")
 
         try:
             import gridmon.nagios.nagios
@@ -271,11 +265,16 @@ class Tester(object):
         target1 = self.path + __TEST_FILENAME__ + str(random.randint(0, __MAX_RND__))
         target2 = target1 + "_moved"
 
+        # initial HEAD request
+        results.append(self.head(self.path))
+        results[-1].finalize("HEAD on path", "HEAD on the path")
+
         # initial PUT request - if this fails, we're doomed
         results.append(self.put(target1))
         results[-1].finalize("PUT", "PUT a file")
         putfailed = results[-1].outcome == EX_CRITICAL or results[-1].outcome == EX_UNKNOWN
 
+        # tests that depend on PUT having succeeded
         alltests = [
             SingleTest("GET", "GET a file", self.get, [target1]),
             SingleTest("OPTIONS", "OPTIONS on file", self.options, [target1]),
@@ -315,7 +314,7 @@ class Tester(object):
         self.logger(V_DEBUG, "URI " + str(target1) + "\n")
 
         for result in results:
-            self.logger(V_DEBUG, result.long_output())
+            self.logger(V_DEBUG, result.long_output(escapeHTML=True))
 
         self.logger(V_MINIMAL, "\n")
         if self.args.metric:
@@ -342,15 +341,19 @@ class CurlTester(Tester):
         curl.setopt(pycurl.URL, target)
         curl.setopt(pycurl.SSL_VERIFYPEER, not self.insecure)
 
-        self.curlout = StringIO.StringIO()
-        curl.setopt(pycurl.WRITEFUNCTION, self.curlout.write)
+        self.responseBody = StringIO.StringIO()
+        curl.setopt(pycurl.WRITEFUNCTION, self.responseBody.write)
 
-        self.curlhdr = StringIO.StringIO()
-        curl.setopt(pycurl.HEADERFUNCTION, self.curlhdr.write)
+        self.responseHeader = StringIO.StringIO()
+        curl.setopt(pycurl.HEADERFUNCTION, self.responseHeader.write)
 
-        self.curldebug = StringIO.StringIO()
+        self.history = StringIO.StringIO()
+        def debugfunction(self, msgtype, msg):
+            if msgtype >= 1 and msgtype <= 4:
+                self.history.write(msg)
+
         curl.setopt(curl.VERBOSE, 1)
-        curl.setopt(pycurl.DEBUGFUNCTION, lambda x, y: self.curldebug.write(str(x) + y))
+        curl.setopt(pycurl.DEBUGFUNCTION, lambda x, y: debugfunction(self, x, y))
 
         return curl
     def put(self, target):
@@ -368,7 +371,7 @@ class CurlTester(Tester):
         result = self.perform(curl)
 
         allows = None
-        for line in self.curlhdr.getvalue().split("\n"):
+        for line in self.responseHeader.getvalue().split("\n"):
             if line.startswith("Allow:"):
                 allows = line
 
@@ -394,7 +397,7 @@ class CurlTester(Tester):
     def get(self, target):
         curl = self.getcurl(target)
         result = self.perform(curl)
-        if self.curlout.getvalue() != __TEST_FILE__:
+        if self.responseBody.getvalue() != __TEST_FILE__:
             result.validationFailure("ERROR: The file downloaded not the same as the file uploaded!")
         return result
     def perform(self, curl):
@@ -405,11 +408,7 @@ class CurlTester(Tester):
             elapsed = curl.getinfo(pycurl.TOTAL_TIME)
             result = TestResult(status, elapsed, self.args.warning)
 
-            result.setheader(self.curlhdr.getvalue())
-            result.setwriteout(self.curlout.getvalue())
-
-            if self.args.verbose >= V_ALL:
-                result.setdebugout(self.curldebug.getvalue())
+            result.sethistory(self.history.getvalue())
             return result
         except Exception, e:
             result = TestResult(0, 0, self.args.warning)
