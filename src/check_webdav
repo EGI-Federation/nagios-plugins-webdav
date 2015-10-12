@@ -40,6 +40,7 @@ import random
 import traceback
 import urlparse
 import cgi
+import subprocess
 
 __version__ = "0.1"
 
@@ -78,6 +79,18 @@ def http_status_to_explanation(status):
     elif status == 0:
         return "connection failure (service down? SSL not configured properly?)"
     return "status {0}".format(status)
+
+def add_prefix(string, prefix):
+    ss = StringIO.StringIO()
+    for line in string.splitlines():
+        ss.write(prefix + line + "\n")
+    return ss.getvalue()
+
+# returns the vo of the provided proxy
+def get_vo(proxy):
+    # vo = subprocess.check_output("voms-proxy-info -file {0} -vo".format(proxy))
+    return "dteam"
+    return vo
 
 def getargs():
     class CustomFormatter(argparse.ArgumentDefaultsHelpFormatter, argparse.RawTextHelpFormatter):
@@ -214,15 +227,14 @@ class TestResult(object):
 
         output.write("{0:20} {1:5} ({2:<10} sec)   {3}\n".format(self.name, self.status, self.elapsed, s))
         for i in self.messages:
-            output.write(i)
-            output.write("\n")
+            output.write(add_prefix(i, "   "))
 
         if (self.outcome == EX_CRITICAL or self.outcome == EX_UNKNOWN) and self.history:
-            output.write("The request/response history follows.\n\n")
+            output.write("    The request/response history follows.\n\n")
             if escapeHTML:
-                output.write(cgi.escape(self.history))
+                output.write(add_prefix(cgi.escape(self.history), "    "))
             else:
-                output.write(self.history)
+                output.write(add_prefix(self.history, "    "))
 
         return output.getvalue()
 
@@ -267,7 +279,7 @@ class Tester(object):
 
         # initial HEAD request
         results.append(self.head(self.path))
-        results[-1].finalize("HEAD on path", "HEAD on the path")
+        results[-1].finalize("HEAD on dir", "HEAD on the dir")
 
         # initial PUT request - if this fails, we're doomed
         results.append(self.put(target1))
@@ -312,9 +324,13 @@ class Tester(object):
             self.logger(V_EXTENDED, ";; ")
         self.logger(V_DEBUG, "\n")
         self.logger(V_DEBUG, "URI " + str(target1) + "\n")
+        self.logger(V_DEBUG, "Proxy VO " + str(get_vo(self.args.proxy)) + "\n")
+
+        # if running inside nagios, escape all HTML
+        escapeHTML = "NAGIOS_ARG1" in os.environ
 
         for result in results:
-            self.logger(V_DEBUG, result.long_output(escapeHTML=True))
+            self.logger(V_DEBUG, result.long_output(escapeHTML=escapeHTML))
 
         self.logger(V_MINIMAL, "\n")
         if self.args.metric:
@@ -349,8 +365,16 @@ class CurlTester(Tester):
 
         self.history = StringIO.StringIO()
         def debugfunction(self, msgtype, msg):
-            if msgtype >= 1 and msgtype <= 4:
-                self.history.write(msg)
+            if False:
+                if msgtype == 2 or msgtype == 4:
+                    self.history.write(repr(msg))
+                if msgtype == 1 or msgtype == 3:
+                    self.history.write(repr(msg))
+            else:
+                if msgtype == 2 or msgtype == 4:
+                    self.history.write(add_prefix(msg, "=> "))
+                if msgtype == 1 or msgtype == 3:
+                    self.history.write(add_prefix(msg, "<= "))
 
         curl.setopt(curl.VERBOSE, 1)
         curl.setopt(pycurl.DEBUGFUNCTION, lambda x, y: debugfunction(self, x, y))
