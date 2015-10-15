@@ -2,7 +2,7 @@
 
 Name:           nagios-plugins-webdav
 Version:        0.1
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        Nagios Plugin - check_webdav
 Group:          Applications/Internet
 License:        ASL 2.0
@@ -13,6 +13,7 @@ BuildArch:      x86_64
 Requires:       time
 Requires:       pycurl
 Requires:       python-GridMon
+Requires:       voms-clients-cpp
 
 %description
 This package provides a nagios plugin to test the webdav interface of an endpoint.
@@ -34,7 +35,7 @@ cp --preserve=timestamps src/check_webdav %{buildroot}%{_libdir}/nagios/plugins
 %files
 %{_libdir}/nagios/plugins/check_webdav
 %doc LICENSE
-%doc README
+%doc README.md
 
 
 %clean

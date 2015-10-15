@@ -81,13 +81,14 @@ def http_status_to_explanation(status):
     return "status {0}".format(status)
 
 def add_prefix(string, prefix):
+    """Returns a new string with the prefix string added before each line"""
     ss = StringIO.StringIO()
     for line in string.splitlines():
         ss.write(prefix + line + "\n")
     return ss.getvalue()
 
-# returns the vo of the provided proxy
 def get_vo(proxy):
+    """Returns the VO of the provided proxy"""
     process = subprocess.Popen(["voms-proxy-info", "-file", proxy, "-vo"],
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = process.communicate()
@@ -95,6 +96,7 @@ def get_vo(proxy):
 
 credentials = ""
 def get_credentials_information(proxy):
+    """Returns verbose information about the given proxy"""
     process = subprocess.Popen(["voms-proxy-info", "-file", proxy, "-all"],
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = process.communicate()
@@ -169,27 +171,43 @@ class SingleTest:
         self.method = method
         self.args = args
         self.expected = expected
+    def finalize(self, result):
+        result.setparams(self.name, self.description, expected_status=self.expected)
+        result.finalize()
     def run(self):
-        return self.method(*self.args)
+        result = self.method(*self.args)
+        self.finalize(result)
+        return result
+    def skip(self, msg):
+        result = TestResult(0)
+        self.finalize(result)
+        return result
 
 class TestResult(object):
-    def __init__(self, status, elapsed, warning):
-        self.status = status
-        self.elapsed = elapsed
-        self.failed = False
-        self.unknown = False
+    """An object to store and display the results from a single test run"""
+    STATE_NOT_RUN = 1
+    STATE_RUN     = 2
+    STATE_FAILED  = 3
+
+    def __init__(self, warnthres):
+        self.state = TestResult.STATE_NOT_RUN
+        self.warnthres = warnthres
+
         self.messages = []
-        self.warning = warning
         self.history = None
         self.target = None
 
-    def validationFailure(self, msg):
-        self.failed = True
-        self.messages.append(msg)
+        self.status = 0
+        self.elapsed = 0
+    def set(self, status, elapsed):
+        self.status = status
+        self.elapsed = elapsed
+        if self.state == TestResult.STATE_NOT_RUN:
+            self.state = TestResult.STATE_RUN
 
-    def unknownFailure(self, msg):
-        self.unknown = True
-        self.messages.append(msg)
+    def failure(self, msg):
+        self.diagnostic(msg)
+        self.state = TestResult.STATE_FAILED
 
     def sethistory(self, history):
         self.history = history
@@ -197,33 +215,38 @@ class TestResult(object):
     def diagnostic(self, msg):
         self.messages.append(msg)
 
-    def finalize(self, name, description, expected_status=None):
+    def setparams(self, name, description, expected_status=None):
         self.name = name
         self.description = description
         self.short_name = name.lower().replace(" ", "_").replace("-", "_")
         self.expected_status = expected_status
+
+    def finalize(self):
         self.outcome = self.determine_outcome()
 
     def determine_outcome(self):
-        if self.unknown:
+        if self.state == TestResult.STATE_NOT_RUN:
             return EX_UNKNOWN
-        if self.failed:
+        if self.state == TestResult.STATE_FAILED:
             return EX_CRITICAL
+
+        assert self.state == TestResult.STATE_RUN
         if self.expected_status != None and self.status != self.expected_status:
             return EX_CRITICAL
         elif (self.expected_status == None and (self.status < 200 or self.status >= 300)):
             return EX_CRITICAL
-        elif self.elapsed >= self.warning:
+        elif self.elapsed >= self.warnthres:
             return EX_WARNING
         else:
             return EX_OK
 
-    def short_output(self):
+    def performance_data(self):
+        # If a test fails, make nagios show an empty graph
         if self.outcome == EX_CRITICAL or self.outcome == EX_UNKNOWN:
             return ""
         return "{0}={1:.2f}s".format(self.short_name, self.elapsed)
 
-    def passive_short(self):
+    def short_output(self):
         s = code_to_str(self.outcome)
         out = "{0}: {1}".format(s, self.description)
         if self.outcome == EX_CRITICAL:
@@ -235,6 +258,7 @@ class TestResult(object):
             indent = "&nbsp;"*4
         else:
             indent = " "*4
+
         output = StringIO.StringIO()
         s = code_to_str(self.outcome)
 
@@ -260,11 +284,13 @@ class TestResult(object):
         return output.getvalue()
 
 class Tester(object):
-    def __init__(self, args, logger):
+    def __init__(self, args):
         self.args = args
-        # self.path = "https://{0}:{1}/{2}/".format(args.hostname, args.port, args.path)
         self.path = args.uri
-        self.logger = logger
+
+    def log(self, level, message):
+        if level <= self.args.verbose:
+            print(message, end="")
 
     def determine_exit_code(self, results):
         outcomes = [x.outcome for x in results]
@@ -274,14 +300,42 @@ class Tester(object):
             return EX_WARNING
         return EX_OK
 
+    def print_results(self, results):
+        """Print all necessary output to stdout"""
+        if self.global_outcome == EX_OK:
+            self.log(V_MINIMAL, "OK: all tests successful")
+        elif self.global_outcome == EX_WARNING:
+            self.log(V_MINIMAL, "WARNING: some tests slow")
+        elif self.global_outcome == EX_CRITICAL:
+            self.log(V_MINIMAL, "CRITICAL: some tests failed")
+        elif self.global_outcome == EX_UNKNOWN:
+            self.log(V_MINIMAL, "UNKNOWN: an unknown error occured")
+
+        # publish performance data, used by nagios in making graphs
+        self.log(V_EXTENDED, " | ")
+        for result in results:
+            self.log(V_EXTENDED, result.performance_data())
+            self.log(V_EXTENDED, "  ")
+        self.log(V_DEBUG, "\n")
+        # self.log(V_DEBUG, "URI: " + str(target1) + "\n")
+
+        # if running inside nagios, escape all HTML
+        printHTML = "NAGIOS_ARG1" in os.environ
+
+        for result in results:
+            self.log(V_DEBUG, result.long_output(printHTML=printHTML))
+
+        self.log(V_MINIMAL, "\n")
+
     def publish_results(self, results):
+        """Publish the passive test results to Nagios."""
         publish = []
         for r in results:
             item = {}
             item["status"] = r.outcome
-            item["host"] = self.args.hostname
+            item["host"] = urlparse.urlparse(self.args.uri).hostname
             item["details"] = r.long_output(printHTML=True)
-            item["summary"] = r.passive_short()
+            item["summary"] = r.short_output()
             item["service"] = self.args.metric + "-" + r.short_name.upper() + "-" + self.args.fqan
             publish.append(item)
 
@@ -289,8 +343,8 @@ class Tester(object):
             import gridmon.nagios.nagios
             gridmon.nagios.nagios.publishPassiveResult(publish)
         except Exception, e:
-            self.logger(V_DEBUG, "Error: could not publish passive result, an exception occured\n")
-            self.logger(V_DEBUG, "Exception text:  " + str(e) + "\n")
+            self.log(V_DEBUG, "Error: could not publish passive result, an exception occured\n")
+            self.log(V_DEBUG, "Exception text:  " + str(e) + "\n")
 
     def test(self):
         results = []
@@ -298,69 +352,56 @@ class Tester(object):
         target1 = self.path + __TEST_FILENAME__ + str(random.randint(0, __MAX_RND__))
         target2 = target1 + "_moved"
 
-        # initial HEAD request
-        results.append(self.head(self.path))
-        results[-1].finalize("HEAD on dir", "HEAD on the dir")
+        # read tests
+        readtests = [
+            SingleTest("DIR HEAD", "HEAD on dir", self.head, [self.path]),
+            SingleTest("DIR GET", "GET on dir", self.get, [self.path, None])
+            # SingleTest("DIR PROPFIND", "PROPFIND on dir", self.propfind, [self.path]),
+        ]
 
-        # initial PUT request - if this fails, we're doomed
-        results.append(self.put(target1))
-        results[-1].finalize("PUT", "PUT a file")
+        for t in readtests:
+            results.append(t.run())
+
+        # initial PUT - if this fails, skip file tests
+        put = SingleTest("FILE PUT", "Upload a file to the directory", self.put, [target1])
+        results.append(put.run())
         putfailed = results[-1].outcome == EX_CRITICAL or results[-1].outcome == EX_UNKNOWN
 
         # tests that depend on PUT having succeeded
-        alltests = [
-            SingleTest("GET", "GET a file", self.get, [target1]),
-            SingleTest("OPTIONS", "OPTIONS on file", self.options, [target1]),
-            SingleTest("PUT on same path", "PUT on existing path, should return 409", self.put, [target1], expected=409),
-            SingleTest("MOVE", "MOVE file to another path", self.move, [target1, target2]),
-            SingleTest("HEAD", "HEAD on a file", self.head, [target2]),
-            SingleTest("HEAD on non-existent", "HEAD on a file that does not exist, should return 404", self.head, [target1], expected=404),
-            SingleTest("PROPFIND", "PROPFIND a file", self.propfind, [target2]),
-            SingleTest("DELETE", "DELETE a file", self.delete, [target2])
+        deptests = [
+            SingleTest("FILE GET", "Download uploaded file", self.get, [target1, __TEST_FILE__]),
+            SingleTest("FILE OPTIONS", "OPTIONS on uploaded file", self.options, [target1]),
+            SingleTest("FILE MOVE", "MOVE uploaded file to another path", self.move, [target1, target2]),
+            SingleTest("FILE HEAD", "HEAD on uploaded file", self.head, [target2]),
+            SingleTest("FILE HEAD on non-existent", "HEAD on a path that does not exist, should return 404", self.head, [target1], expected=404),
+            SingleTest("FILE PROPFIND", "PROPFIND on uploaded file", self.propfind, [target2]),
+            SingleTest("FILE DELETE", "DELETE on uploaded file", self.delete, [target2])
         ]
 
         # run the rest of the tests
-        for t in alltests:
+        for t in deptests:
             if putfailed:
-                results.append(TestResult(0, 0, 0))
-                results[-1].unknownFailure("PUT failed - bailing out")
+                results.append(t.skip("PUT failed - bailing out"))
             else:
                 results.append(t.run())
-            results[-1].finalize(t.name, t.description, t.expected)
+
+        # make sure that even if an operation failed, nothing is left behind
+        self.delete(target1)
+        self.delete(target2)
 
         # print all output
-        global_outcome = self.determine_exit_code(results)
-        if global_outcome == EX_OK:
-            self.logger(V_MINIMAL, "OK: all tests successful")
-        elif global_outcome == EX_WARNING:
-            self.logger(V_MINIMAL, "WARNING: some tests slow")
-        elif global_outcome == EX_CRITICAL:
-            self.logger(V_MINIMAL, "CRITICAL: some tests failed")
-        elif global_outcome == EX_UNKNOWN:
-            self.logger(V_MINIMAL, "UNKNOWN: an unknown error occured")
+        self.global_outcome = self.determine_exit_code(results)
+        self.print_results(results)
 
-        self.logger(V_EXTENDED, " | ")
-        for result in results:
-            self.logger(V_EXTENDED, result.short_output())
-            self.logger(V_EXTENDED, ";; ")
-        self.logger(V_DEBUG, "\n")
-        self.logger(V_DEBUG, "URI: " + str(target1) + "\n")
-
-        # if running inside nagios, escape all HTML
-        printHTML = "NAGIOS_ARG1" in os.environ
-
-        for result in results:
-            self.logger(V_DEBUG, result.long_output(printHTML=printHTML))
-
-        self.logger(V_MINIMAL, "\n")
+        # publish results to nagios
         if self.args.metric:
             self.publish_results(results)
 
-        return global_outcome
+        return self.global_outcome
 
 class CurlTester(Tester):
-    def __init__(self, args, logger):
-        Tester.__init__(self, args, logger)
+    def __init__(self, args):
+        Tester.__init__(self, args)
         self.insecure = False
     def getcurl(self, target):
         args = self.args
@@ -374,7 +415,7 @@ class CurlTester(Tester):
         curl.setopt(pycurl.CAINFO, args.proxy)
         curl.setopt(pycurl.SSLCERT, args.proxy)
         curl.setopt(pycurl.CAPATH, args.capath)
-        curl.____mytarget  = target # pycurl does not support getting the URL back..
+        curl.__mytarget  = target # pycurl does not support getting the URL back..
         curl.setopt(pycurl.URL, target)
         curl.setopt(pycurl.SSL_VERIFYPEER, not self.insecure)
 
@@ -386,16 +427,10 @@ class CurlTester(Tester):
 
         self.history = StringIO.StringIO()
         def debugfunction(self, msgtype, msg):
-            if False:
-                if msgtype == 2 or msgtype == 4:
-                    self.history.write(repr(msg))
-                if msgtype == 1 or msgtype == 3:
-                    self.history.write(repr(msg))
-            else:
-                if msgtype == 2 or msgtype == 4:
-                    self.history.write(add_prefix(msg, "=> "))
-                if msgtype == 1 or msgtype == 3:
-                    self.history.write(add_prefix(msg, "<= "))
+            if msgtype == 2 or msgtype == 4:
+                self.history.write(add_prefix(msg, "=> "))
+            if msgtype == 1 or msgtype == 3:
+                self.history.write(add_prefix(msg, "<= "))
 
         curl.setopt(curl.VERBOSE, 1)
         curl.setopt(pycurl.DEBUGFUNCTION, lambda x, y: debugfunction(self, x, y))
@@ -421,7 +456,7 @@ class CurlTester(Tester):
                 allows = line
 
         if allows is None:
-            result.validationFailure("ERROR: Could not find Allow response")
+            result.failure("ERROR: Could not find Allow response")
         else:
             result.diagnostic(allows)
 
@@ -438,47 +473,38 @@ class CurlTester(Tester):
     def propfind(self, target):
         curl = self.getcurl(target)
         curl.setopt(pycurl.CUSTOMREQUEST, "PROPFIND")
+        curl.setopt(pycurl.HTTPHEADER, ["Depth: 1"])
         return self.perform(curl)
-    def get(self, target):
+    def get(self, target, contents):
         curl = self.getcurl(target)
         result = self.perform(curl)
-        if self.responseBody.getvalue() != __TEST_FILE__:
-            result.validationFailure("ERROR: The file downloaded not the same as the file uploaded!")
+        if contents is not None and self.responseBody.getvalue() != contents:
+            result.failure("ERROR: File contents are wrong!")
         return result
     def perform(self, curl):
+        """Return a TestResult object with information about what happened during the request"""
+        result = TestResult(self.args.warning)
         try:
             curl.perform()
 
             status = curl.getinfo(pycurl.HTTP_CODE)
             elapsed = curl.getinfo(pycurl.TOTAL_TIME)
-            result = TestResult(status, elapsed, self.args.warning)
-
-            result.sethistory(self.history.getvalue())
-            result.target = curl.____mytarget
-            return result
+            result.set(status, elapsed)
         except Exception, e:
-            result = TestResult(0, 0, self.args.warning)
-            result.target = curl.____mytarget
-            result.validationFailure("Curl exception: " + str(e))
-            return result
+            result.failure("Curl exception: " + str(e))
 
-# might remain unused
-def filterhost(h):
-    if "://" in h:
-        h = h[h.find("://")+3:]
-    if "/" in h:
-        h = h[:h.find("/")]
-    if ":" in h:
-        self.port = h[h.find(":")+1:]
-        h = h[:h.find(":")]
+        result.sethistory(self.history.getvalue())
+        result.target = curl.__mytarget
+        return result
 
 def main():
     try:
         args = getargs()
+
         global credentials
         credentials = get_credentials_information(args.proxy)
-        logger = functools.partial(log, threshold=args.verbose)
-        tester = CurlTester(args, logger)
+
+        tester = CurlTester(args)
         return tester.test()
     except Exception, e:
         print("An unknown error occured")
