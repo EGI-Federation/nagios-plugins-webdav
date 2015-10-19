@@ -76,6 +76,10 @@ def http_status_to_explanation(status):
         return "403 forbidden (are you using a valid certificate and path?)"
     elif status == 401:
         return "401 unauthorized (are you using a valid certificate and path?)"
+    elif status == 500:
+        return "500 server error"
+    elif status == 507:
+        return "507 insufficient storage"
     elif status == 0:
         return "connection failure (service down? SSL not configured properly?)"
     return "status {0}".format(status)
