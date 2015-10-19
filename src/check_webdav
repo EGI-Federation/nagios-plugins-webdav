@@ -180,6 +180,7 @@ class SingleTest:
         return result
     def skip(self, msg):
         result = TestResult(0)
+        result.diagnostic(msg)
         self.finalize(result)
         return result
 
@@ -267,6 +268,7 @@ class TestResult(object):
             output.write(add_prefix(i,indent))
 
         if self.outcome == EX_CRITICAL:
+            output.write(add_prefix("For guidance on troubleshooting a failing endpoint, please have a look at https://twiki.cern.ch/twiki/bin/view/LCG/HTTPTFSAMProbe", indent))
             if self.target:
                 output.write(add_prefix("Target URL: " + self.target + "\n", indent))
             output.write(add_prefix("Credentials:\n", indent))
@@ -385,7 +387,7 @@ class Tester(object):
             else:
                 results.append(t.run())
 
-        # make sure that even if an operation failed, nothing is left behind
+        # make sure that even if some operations failed, nothing is left behind
         self.delete(target1)
         self.delete(target2)
 
