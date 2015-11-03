@@ -69,6 +69,16 @@ def code_to_str(code):
     elif code == EX_UNKNOWN:
         return "UNKNOWN"
 
+def ensure_safe_path(path):
+    # Before running a dangerous operation (ie delete), make sure the path contains __TEST_FILENAME__
+    # If not, something terribly wrong is going on. This should never trigger under any circumstances.
+
+    if path.count(__TEST_FILENAME__) <= 0:
+        raise Exception("ERROR: Refusing to touch something which does not contain {0}".format(__TEST_FILENAME__))
+
+    if path.endswith("/"):
+        raise Exception("ERROR: Refusing to touch a directory")
+
 def http_status_to_explanation(status):
     if status == 404:
         return "404 file/path not found (are you using an incorrect path?)"
@@ -96,7 +106,7 @@ def get_vo(proxy):
     process = subprocess.Popen(["voms-proxy-info", "-file", proxy, "-vo"],
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = process.communicate()
-    return stdout
+    return stdout.strip()
 
 credentials = ""
 def get_credentials_information(proxy):
@@ -169,6 +179,7 @@ def log(level, message, threshold=None):
         print(message, end="")
 
 class SingleTest:
+    """A class to help run a single test and produce the corresponding TestResult"""
     def __init__(self, name, description, method, args, expected=None):
         self.name = name
         self.description = description
@@ -189,7 +200,7 @@ class SingleTest:
         return result
 
 class TestResult(object):
-    """An object to store and display the results from a single test run"""
+    """A class to store and display the results from a single test run"""
     STATE_NOT_RUN = 1
     STATE_RUN     = 2
     STATE_FAILED  = 3
@@ -267,14 +278,16 @@ class TestResult(object):
         output = StringIO.StringIO()
         s = code_to_str(self.outcome)
 
-        output.write("{0:20} {1:5} ({2:<10} sec)   {3}\n".format(self.name, self.status, self.elapsed, s))
+        output.write("{0:25} {1:5} ({2:<10} sec)   {3}\n".format(self.name, self.status, self.elapsed, s))
+
+        if self.target:
+            output.write(add_prefix("Target: " + self.target + "\n", indent))
+
         for i in self.messages:
             output.write(add_prefix(i,indent))
 
         if self.outcome == EX_CRITICAL:
             output.write(add_prefix("For guidance on troubleshooting a failing endpoint, please have a look at https://twiki.cern.ch/twiki/bin/view/LCG/HTTPTFSAMProbe", indent))
-            if self.target:
-                output.write(add_prefix("Target URL: " + self.target + "\n", indent))
             output.write(add_prefix("Credentials:\n", indent))
             output.write(add_prefix(credentials, indent*2))
 
@@ -352,44 +365,80 @@ class Tester(object):
             self.log(V_DEBUG, "Error: could not publish passive result, an exception occured\n")
             self.log(V_DEBUG, "Exception text:  " + str(e) + "\n")
 
+    def run_put_ok_tests(self, target1, target2):
+        """Run all 'put-succeeded' tests and return the results"""
+        results = []
+        tests = [
+            SingleTest("FILE GET", "GET file", self.get, [target1, __TEST_FILE__]),
+            SingleTest("FILE OPTIONS", "OPTIONS on file", self.options, [target1]),
+            SingleTest("FILE MOVE", "MOVE file to another path", self.move, [target1, target2]),
+            SingleTest("FILE HEAD", "HEAD on file", self.head, [target2]),
+            SingleTest("FILE HEAD on non-existent", "HEAD on a path that does not exist, should return 404", self.head, [target1], expected=404),
+            SingleTest("FILE PROPFIND", "PROPFIND on file", self.propfind, [target2]),
+            SingleTest("FILE DELETE", "DELETE on file", self.delete, [target2])
+        ]
+
+        for t in tests: results.append(t.run())
+        return results
+
+    def run_put_failed_tests(self):
+        """Run all 'put-failed' tests and return the results"""
+        results = []
+
+        # check if the standard file exists
+        standard_file = self.path + "{0}_HTTPTFtest.txt".format(get_vo(self.args.proxy).upper())
+        get = SingleTest("FILE GET", "GET file", self.get, [standard_file])
+        results.append(get.run())
+        getfailed = results[-1].outcome == EX_CRITICAL or results[-1].outcome == EX_UNKNOWN
+
+        readtests = [
+            SingleTest("FILE OPTIONS", "OPTIONS on file", self.options, [standard_file]),
+            SingleTest("FILE HEAD", "HEAD on file", self.head, [standard_file]),
+            SingleTest("FILE HEAD on non-existent", "HEAD on a path that does not exist, should return 404",
+                       self.head,[standard_file+"does_not_exist"], expected=404),
+            SingleTest("FILE PROPFIND", "PROPFIND on file", self.propfind, [standard_file]),
+        ]
+
+        for t in readtests:
+            if not getfailed:
+                results.append(t.run())
+            else:
+                results.append(t.skip("Standard file not found, skipping"))
+
+        skipped = [
+            SingleTest("FILE MOVE", "MOVE file to another path", self.move, [None, None]),
+            SingleTest("FILE DELETE", "DELETE on file", self.delete, [None])
+        ]
+
+        for t in skipped: results.append(t.skip("PUT failed, running read-only tests"))
+        return results
+
     def test(self):
         results = []
 
         target1 = self.path + __TEST_FILENAME__ + str(random.randint(0, __MAX_RND__))
         target2 = target1 + "_moved"
 
-        # read tests
+        # declare read tests
         readtests = [
             SingleTest("DIR HEAD", "HEAD on dir", self.head, [self.path]),
             SingleTest("DIR GET", "GET on dir", self.get, [self.path, None])
             # SingleTest("DIR PROPFIND", "PROPFIND on dir", self.propfind, [self.path]),
         ]
 
+        # run read tests
         for t in readtests:
             results.append(t.run())
 
-        # initial PUT - if this fails, skip file tests
-        put = SingleTest("FILE PUT", "Upload a file to the directory", self.put, [target1])
+        # initial PUT - do I have write access to the server?
+        put = SingleTest("FILE PUT", "PUT a file", self.put, [target1])
         results.append(put.run())
         putfailed = results[-1].outcome == EX_CRITICAL or results[-1].outcome == EX_UNKNOWN
 
-        # tests that depend on PUT having succeeded
-        deptests = [
-            SingleTest("FILE GET", "Download uploaded file", self.get, [target1, __TEST_FILE__]),
-            SingleTest("FILE OPTIONS", "OPTIONS on uploaded file", self.options, [target1]),
-            SingleTest("FILE MOVE", "MOVE uploaded file to another path", self.move, [target1, target2]),
-            SingleTest("FILE HEAD", "HEAD on uploaded file", self.head, [target2]),
-            SingleTest("FILE HEAD on non-existent", "HEAD on a path that does not exist, should return 404", self.head, [target1], expected=404),
-            SingleTest("FILE PROPFIND", "PROPFIND on uploaded file", self.propfind, [target2]),
-            SingleTest("FILE DELETE", "DELETE on uploaded file", self.delete, [target2])
-        ]
-
-        # run the rest of the tests
-        for t in deptests:
-            if putfailed:
-                results.append(t.skip("PUT failed - bailing out"))
-            else:
-                results.append(t.run())
+        if not putfailed:
+            results += self.run_put_ok_tests(target1, target2)
+        else:
+            results += self.run_put_failed_tests()
 
         # make sure that even if some operations failed, nothing is left behind
         self.delete(target1)
@@ -421,7 +470,7 @@ class CurlTester(Tester):
         curl.setopt(pycurl.CAINFO, args.proxy)
         curl.setopt(pycurl.SSLCERT, args.proxy)
         curl.setopt(pycurl.CAPATH, args.capath)
-        curl.__mytarget  = target # pycurl does not support getting the URL back..
+        curl.__mytarget  = target # pycurl does not support getting the URL back, so let's improvise
         curl.setopt(pycurl.URL, target)
         curl.setopt(pycurl.SSL_VERIFYPEER, not self.insecure)
 
@@ -433,8 +482,10 @@ class CurlTester(Tester):
 
         self.history = StringIO.StringIO()
         def debugfunction(self, msgtype, msg):
+            # request
             if msgtype == 2 or msgtype == 4:
                 self.history.write(add_prefix(msg, "=> "))
+            # response
             if msgtype == 1 or msgtype == 3:
                 self.history.write(add_prefix(msg, "<= "))
 
@@ -448,6 +499,9 @@ class CurlTester(Tester):
         curl.setopt(pycurl.CUSTOMREQUEST, "PUT")
         return self.perform(curl)
     def delete(self, target):
+        # safety check: make sure we aren't deleting anything important
+        ensure_safe_path(target)
+
         curl = self.getcurl(target)
         curl.setopt(pycurl.CUSTOMREQUEST, "DELETE")
         return self.perform(curl)
@@ -468,6 +522,9 @@ class CurlTester(Tester):
 
         return result
     def move(self, source, destination):
+        ensure_safe_path(source)
+        ensure_safe_path(destination)
+
         curl = self.getcurl(source)
         curl.setopt(pycurl.CUSTOMREQUEST, "MOVE")
         curl.setopt(pycurl.HTTPHEADER, ["Destination: {0}".format(destination)])
@@ -481,7 +538,7 @@ class CurlTester(Tester):
         curl.setopt(pycurl.CUSTOMREQUEST, "PROPFIND")
         curl.setopt(pycurl.HTTPHEADER, ["Depth: 1"])
         return self.perform(curl)
-    def get(self, target, contents):
+    def get(self, target, contents=None):
         curl = self.getcurl(target)
         result = self.perform(curl)
         if contents is not None and self.responseBody.getvalue() != contents:
