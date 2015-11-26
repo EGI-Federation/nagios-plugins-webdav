@@ -32,7 +32,6 @@ import os
 import sys
 import time
 import pycurl
-import ldap
 import functools
 import argparse
 import StringIO
