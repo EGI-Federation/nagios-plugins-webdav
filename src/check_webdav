@@ -40,6 +40,7 @@ import traceback
 import urlparse
 import cgi
 import subprocess
+import re
 
 __version__ = "0.1"
 
@@ -439,9 +440,8 @@ class Tester(object):
         else:
             results += self.run_put_failed_tests()
 
-        # make sure that even if some operations failed, nothing is left behind
-        self.delete(target1)
-        self.delete(target2)
+        # do a cleanup, remove any files that might have been left over from a previous failed run
+        self.cleanup(self.path)
 
         # print all output
         self.global_outcome = self.determine_exit_code(results)
@@ -543,6 +543,19 @@ class CurlTester(Tester):
         if contents is not None and self.responseBody.getvalue() != contents:
             result.failure("ERROR: File contents are wrong!")
         return result
+    # clean all residual testfiles in target directory that might have been
+    # left by previous runs of this script.
+    # Prevents accumulation of testfiles
+    def cleanup(self, target):
+        self.propfind(target)
+        xml = self.responseBody.getvalue()
+        uri = urlparse.urlparse(target)
+
+        iter = re.finditer(re.escape("<D:href>") + "(" + re.escape(uri.path) + __TEST_FILENAME__ + "\d+(_moved)?" + ")" + re.escape("</D:href>"), xml)
+        for match in iter:
+            path = match.group(1)
+            newuri = uri._replace(path=path)
+            self.delete(newuri.geturl())
     def perform(self, curl):
         """Return a TestResult object with information about what happened during the request"""
         result = TestResult(self.args.warning)
