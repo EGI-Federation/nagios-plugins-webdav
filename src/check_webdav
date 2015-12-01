@@ -54,10 +54,12 @@ V_EXTENDED = 1
 V_DEBUG    = 2
 V_ALL      = 3
 
-EX_OK       = 0
-EX_WARNING  = 1
-EX_CRITICAL = 2
-EX_UNKNOWN  = 3
+EX_OK              = 0
+EX_WARNING         = 1
+EX_CRITICAL        = 2
+EX_UNKNOWN         = 3
+EX_OK_PUTFAIL      = 4
+EX_WARNING_PUTFAIL = 5
 
 def code_to_str(code):
     if code == EX_CRITICAL:
@@ -312,7 +314,16 @@ class Tester(object):
             print(message, end="")
 
     def determine_exit_code(self, results):
+        putfail = False
+        for i in results:
+            if i.name == "FILE PUT" and i.outcome == EX_CRITICAL:
+                putfail = True
+
         outcomes = [x.outcome for x in results]
+        if outcomes.count(EX_CRITICAL) == 1 and putfail:
+            if outcomes.count(EX_WARNING) == 0:
+                return EX_OK_PUTFAIL
+            return EX_WARNING_PUTFAIL
         if outcomes.count(EX_CRITICAL) > 0:
             return EX_CRITICAL
         if outcomes.count(EX_WARNING) > 0:
@@ -323,8 +334,12 @@ class Tester(object):
         """Print all necessary output to stdout"""
         if self.global_outcome == EX_OK:
             self.log(V_MINIMAL, "OK: all tests successful")
+        elif self.global_outcome == EX_OK_PUTFAIL:
+            self.log(V_MINIMAL, "OK: all read-only tests successful")
         elif self.global_outcome == EX_WARNING:
             self.log(V_MINIMAL, "WARNING: some tests slow")
+        elif self.global_outcome == EX_WARNING_PUTFAIL:
+            self.log(V_MINIMAL, "WARNING: some read-only tests slow")
         elif self.global_outcome == EX_CRITICAL:
             self.log(V_MINIMAL, "CRITICAL: some tests failed")
         elif self.global_outcome == EX_UNKNOWN:
@@ -451,6 +466,10 @@ class Tester(object):
         if self.args.metric:
             self.publish_results(results)
 
+        if self.global_outcome == EX_OK_PUTFAIL:
+            return EX_OK
+        if self.global_outcome == EX_WARNING_PUTFAIL:
+            return EX_WARNING
         return self.global_outcome
 
 class CurlTester(Tester):
