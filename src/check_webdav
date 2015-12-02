@@ -351,13 +351,15 @@ class Tester(object):
             self.log(V_EXTENDED, result.performance_data())
             self.log(V_EXTENDED, "  ")
         self.log(V_DEBUG, "\n")
-        # self.log(V_DEBUG, "URI: " + str(target1) + "\n")
 
         # if running inside nagios, escape all HTML
         printHTML = "NAGIOS_ARG1" in os.environ
 
         for result in results:
-            self.log(V_DEBUG, result.long_output(printHTML=printHTML))
+            longout = result.long_output(printHTML=printHTML)
+            # prevent nagios from going insane if there's a pipe in the HTML page output
+            if printHTML: longout = longout.replace("|", "--pipe symbol--")
+            self.log(V_DEBUG, longout)
 
         self.log(V_MINIMAL, "\n")
 
