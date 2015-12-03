@@ -42,7 +42,7 @@ import cgi
 import subprocess
 import re
 
-__version__ = "0.1"
+__version__ = "0.2"
 
 __MAX_RND__ = 999999999
 __TEST_FILENAME__ = "test_webdav_access_"

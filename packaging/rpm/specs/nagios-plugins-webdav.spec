@@ -1,8 +1,8 @@
 %global debug_package %{nil}
 
 Name:           nagios-plugins-webdav
-Version:        0.1
-Release:        2%{?dist}
+Version:        0.2.0
+Release:        1%{?dist}
 Summary:        Nagios Plugin - check_webdav
 Group:          Applications/Internet
 License:        ASL 2.0
@@ -42,5 +42,7 @@ cp --preserve=timestamps src/check_webdav %{buildroot}%{_libdir}/nagios/plugins
 rm -rf %{buildroot}
 
 %changelog
+* Thu Dec 03 2015 Georgios Bitzes <georgios.bitzes@cern.ch> - 0.2.0
+- Ready for preprod etf
 * Mon Sep 28 2015 Georgios Bitzes <georgios.bitzes@cern.ch> - 0.1
 - Initial build
