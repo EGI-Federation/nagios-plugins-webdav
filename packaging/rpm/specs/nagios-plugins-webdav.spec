@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 
 Name:           nagios-plugins-webdav
-Version:        0.2.0
+Version:        0.2.1
 Release:        1%{?dist}
 Summary:        Nagios Plugin - check_webdav
 Group:          Applications/Internet
@@ -13,7 +13,7 @@ BuildArch:      x86_64
 Requires:       time
 Requires:       pycurl
 Requires:       python-GridMon
-Requires:       voms-clients-cpp
+Requires:       voms-clients3
 
 %description
 This package provides a nagios plugin to test the webdav interface of an endpoint.
@@ -42,6 +42,8 @@ cp --preserve=timestamps src/check_webdav %{buildroot}%{_libdir}/nagios/plugins
 rm -rf %{buildroot}
 
 %changelog
+* Thu Dec 03 2015 Georgios Bitzes <georgios.bitzes@cern.ch> - 0.2.0
+- Change package dependency to voms-clients3
 * Thu Dec 03 2015 Georgios Bitzes <georgios.bitzes@cern.ch> - 0.2.0
 - Ready for preprod etf
 * Mon Sep 28 2015 Georgios Bitzes <georgios.bitzes@cern.ch> - 0.1
