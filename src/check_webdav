@@ -42,7 +42,7 @@ import cgi
 import subprocess
 import re
 
-__version__ = "0.2.1"
+__version__ = "0.2.2"
 
 __MAX_RND__ = 999999999
 __TEST_FILENAME__ = "test_webdav_access_"
@@ -386,13 +386,13 @@ class Tester(object):
         """Run all 'put-succeeded' tests and return the results"""
         results = []
         tests = [
-            SingleTest("FILE GET", "GET file", self.get, [target1, __TEST_FILE__]),
-            SingleTest("FILE OPTIONS", "OPTIONS on file", self.options, [target1]),
-            SingleTest("FILE MOVE", "MOVE file to another path", self.move, [target1, target2]),
-            SingleTest("FILE HEAD", "HEAD on file", self.head, [target2]),
-            SingleTest("FILE HEAD on non-existent", "HEAD on a path that does not exist, should return 404", self.head, [target1], expected=404),
-            SingleTest("FILE PROPFIND", "PROPFIND on file", self.propfind, [target2]),
-            SingleTest("FILE DELETE", "DELETE on file", self.delete, [target2])
+            SingleTest("04 FILE GET", "GET file", self.get, [target1, __TEST_FILE__]),
+            SingleTest("05 FILE OPTIONS", "OPTIONS on file", self.options, [target1]),
+            SingleTest("06 FILE MOVE", "MOVE file to another path", self.move, [target1, target2]),
+            SingleTest("07 FILE HEAD", "HEAD on file", self.head, [target2]),
+            SingleTest("08 FILE HEAD on non-existent", "HEAD on a path that does not exist, should return 404", self.head, [target1], expected=404),
+            SingleTest("09 FILE PROPFIND", "PROPFIND on file", self.propfind, [target2]),
+            SingleTest("10 FILE DELETE", "DELETE on file", self.delete, [target2])
         ]
 
         for t in tests: results.append(t.run())
@@ -404,16 +404,16 @@ class Tester(object):
 
         # check if the standard file exists
         standard_file = self.path + "{0}_HTTPTFtest.txt".format(get_vo(self.args.proxy).upper())
-        get = SingleTest("FILE GET", "GET file", self.get, [standard_file])
+        get = SingleTest("04 FILE GET", "GET file", self.get, [standard_file])
         results.append(get.run())
         getfailed = results[-1].outcome == EX_CRITICAL or results[-1].outcome == EX_UNKNOWN
 
         readtests = [
-            SingleTest("FILE OPTIONS", "OPTIONS on file", self.options, [standard_file]),
-            SingleTest("FILE HEAD", "HEAD on file", self.head, [standard_file]),
-            SingleTest("FILE HEAD on non-existent", "HEAD on a path that does not exist, should return 404",
+            SingleTest("05 FILE OPTIONS", "OPTIONS on file", self.options, [standard_file]),
+            SingleTest("07 FILE HEAD", "HEAD on file", self.head, [standard_file]),
+            SingleTest("08 FILE HEAD on non-existent", "HEAD on a path that does not exist, should return 404",
                        self.head,[standard_file+"does_not_exist"], expected=404),
-            SingleTest("FILE PROPFIND", "PROPFIND on file", self.propfind, [standard_file]),
+            SingleTest("09 FILE PROPFIND", "PROPFIND on file", self.propfind, [standard_file]),
         ]
 
         for t in readtests:
@@ -423,8 +423,8 @@ class Tester(object):
                 results.append(t.skip("Standard file not found, skipping"))
 
         skipped = [
-            SingleTest("FILE MOVE", "MOVE file to another path", self.move, [None, None]),
-            SingleTest("FILE DELETE", "DELETE on file", self.delete, [None])
+            SingleTest("06 FILE MOVE", "MOVE file to another path", self.move, [None, None]),
+            SingleTest("10 FILE DELETE", "DELETE on file", self.delete, [None])
         ]
 
         for t in skipped: results.append(t.skip("PUT failed, running read-only tests"))
@@ -438,8 +438,8 @@ class Tester(object):
 
         # declare read tests
         readtests = [
-            SingleTest("DIR HEAD", "HEAD on dir", self.head, [self.path]),
-            SingleTest("DIR GET", "GET on dir", self.get, [self.path, None])
+            SingleTest("01 DIR HEAD", "HEAD on dir", self.head, [self.path]),
+            SingleTest("02 DIR GET", "GET on dir", self.get, [self.path, None])
             # SingleTest("DIR PROPFIND", "PROPFIND on dir", self.propfind, [self.path]),
         ]
 
@@ -448,7 +448,7 @@ class Tester(object):
             results.append(t.run())
 
         # initial PUT - do I have write access to the server?
-        put = SingleTest("FILE PUT", "PUT a file", self.put, [target1])
+        put = SingleTest("03 FILE PUT", "PUT a file", self.put, [target1])
         results.append(put.run())
         putfailed = results[-1].outcome == EX_CRITICAL or results[-1].outcome == EX_UNKNOWN
 
