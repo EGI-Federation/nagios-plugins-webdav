@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 
 Name:           nagios-plugins-webdav
-Version:        0.2.4
+Version:        0.2.5
 Release:        1%{?dist}
 Summary:        Nagios Plugin - check_webdav
 Group:          Applications/Internet
@@ -42,6 +42,8 @@ cp --preserve=timestamps src/check_webdav %{buildroot}%{_libdir}/nagios/plugins
 rm -rf %{buildroot}
 
 %changelog
+* Tue Jan 19 2016 Georgios Bitzes <georgios.bitzes@cern.ch> - 0.2.5
+- Add --no-crls option to workaround a strange bug where libcurl/NSS reports "SSL connect error"
 * Tue Jan 12 2016 Georgios Bitzes <georgios.bitzes@cern.ch> - 0.2.4
 - Remove test numbers, force TLS v1
 * Wed Dec 16 2015 Georgios Bitzes <georgios.bitzes@cern.ch> - 0.2.2
