@@ -42,7 +42,7 @@ import cgi
 import subprocess
 import re
 
-__version__ = "0.2.5"
+__version__ = "0.2.6"
 
 __MAX_RND__ = 99
 __TEST_FILENAME__ = "test_webdav_access_"
@@ -376,6 +376,11 @@ class Tester(object):
         for r in results:
             item = {}
             item["status"] = r.outcome
+
+            # mark a failed PUT as WARNING, not CRITICAL
+            if r.name == "FILE PUT" and r.outcome == EX_CRITICAL:
+                item["status"] = EX_WARNING
+
             item["host"] = urlparse.urlparse(self.args.uri).hostname
             item["details"] = r.long_output(printHTML=True)
             item["summary"] = r.short_output()
