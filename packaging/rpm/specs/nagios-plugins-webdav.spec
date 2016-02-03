@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 
 Name:           nagios-plugins-webdav
-Version:        0.2.6
+Version:        0.2.7
 Release:        1%{?dist}
 Summary:        Nagios Plugin - check_webdav
 Group:          Applications/Internet
@@ -42,6 +42,8 @@ cp --preserve=timestamps src/check_webdav %{buildroot}%{_libdir}/nagios/plugins
 rm -rf %{buildroot}
 
 %changelog
+* Wed Feb 03 2016 Georgios Bitzes <georgios.bitzes@cern.ch> - 0.2.7
+- Add DELETE on non-existent test, expecting 404
 * Wed Jan 20 2016 Georgios Bitzes <georgios.bitzes@cern.ch> - 0.2.6
 - Mark a failed PUT as WARNING, not CRITICAL
 * Tue Jan 19 2016 Georgios Bitzes <georgios.bitzes@cern.ch> - 0.2.5

@@ -42,7 +42,7 @@ import cgi
 import subprocess
 import re
 
-__version__ = "0.2.6"
+__version__ = "0.2.7"
 
 __MAX_RND__ = 99
 __TEST_FILENAME__ = "test_webdav_access_"
@@ -287,7 +287,7 @@ class TestResult(object):
         output = StringIO.StringIO()
         s = code_to_str(self.outcome)
 
-        output.write("{0:25} {1:5} ({2:<10} sec)   {3}\n".format(self.name, self.status, self.elapsed, s))
+        output.write("{0:29} {1:5} ({2:<10} sec)   {3}\n".format(self.name, self.status, self.elapsed, s))
 
         if self.target:
             output.write(add_prefix("Target: " + self.target + "\n", indent))
@@ -402,9 +402,12 @@ class Tester(object):
             SingleTest("FILE OPTIONS", "OPTIONS on file", self.options, [target1]),
             SingleTest("FILE MOVE", "MOVE file to another path", self.move, [target1, target2]),
             SingleTest("FILE HEAD", "HEAD on file", self.head, [target2]),
-            SingleTest("FILE HEAD on non-existent", "HEAD on a path that does not exist, should return 404", self.head, [target1], expected=404),
+            SingleTest("FILE HEAD on non-existent", "HEAD on a path that does not exist, should return 404",
+                       self.head, [target1], expected=404),
             SingleTest("FILE PROPFIND", "PROPFIND on file", self.propfind, [target2]),
-            SingleTest("FILE DELETE", "DELETE on file", self.delete, [target2])
+            SingleTest("FILE DELETE", "DELETE on file", self.delete, [target2]),
+            SingleTest("FILE DELETE on non-existent", "DELETE on a file that does not exist, should return 404",
+                       self.delete, [target1], expected=404)
         ]
 
         for t in tests: results.append(t.run())
@@ -435,8 +438,10 @@ class Tester(object):
                 results.append(t.skip("Standard file not found, skipping"))
 
         skipped = [
-            SingleTest("FILE MOVE", "MOVE file to another path", self.move, [None, None]),
-            SingleTest("FILE DELETE", "DELETE on file", self.delete, [None])
+            SingleTest("FILE MOVE", "MOVE file to another path", None, None),
+            SingleTest("FILE DELETE", "DELETE on file", None, None),
+            SingleTest("FILE DELETE on non-existent", "DELETE on a file that does not exist, should return 404",
+                        None, None)
         ]
 
         for t in skipped: results.append(t.skip("PUT failed, running read-only tests"))
@@ -452,7 +457,6 @@ class Tester(object):
         readtests = [
             SingleTest("DIR HEAD", "HEAD on dir", self.head, [self.path]),
             SingleTest("DIR GET", "GET on dir", self.get, [self.path, None])
-            # SingleTest("DIR PROPFIND", "PROPFIND on dir", self.propfind, [self.path]),
         ]
 
         # run read tests
@@ -612,7 +616,7 @@ def prepare_custom_capath(capath, tempcapath):
     process = subprocess.Popen(["rsync", "--archive", "--exclude", "*.r0", capath + "/", tempcapath],
                                stdout=DEVNULL, stderr=subprocess.STDOUT)
     ret = process.wait()
-    assert ret == 0
+    # assert ret == 0
 
 def main():
     try:
