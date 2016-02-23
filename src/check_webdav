@@ -42,7 +42,7 @@ import cgi
 import subprocess
 import re
 
-__version__ = "0.2.8"
+__version__ = "0.2.9"
 
 __MAX_RND__ = 99
 __TEST_FILENAME__ = "test_webdav_access_"
@@ -466,12 +466,12 @@ class Tester(object):
         else:
             results += self.run_put_failed_tests()
 
-        # do a cleanup, remove any files that might have been left over from a previous failed run
-        self.cleanup(self.path)
-
         # print all output
         self.global_outcome = self.determine_exit_code(results)
         self.print_results(results)
+
+        # do a cleanup, remove any files that might have been left over from a previous failed run
+        self.cleanup(self.path)
 
         # publish results to nagios
         if self.args.metric:
@@ -564,6 +564,7 @@ class CurlTester(Tester):
         curl = self.getcurl(target)
         curl.setopt(pycurl.CUSTOMREQUEST, "PROPFIND")
         curl.setopt(pycurl.HTTPHEADER, ["Depth: 1"])
+        curl.setopt(pycurl.POSTFIELDS, '<?xml version="1.0"?><a:propfind xmlns:a="DAV:"><a:prop></a:prop></a:propfind>')
         return self.perform(curl)
     def get(self, target, contents=None):
         curl = self.getcurl(target)
@@ -575,6 +576,7 @@ class CurlTester(Tester):
     # left by previous runs of this script.
     # Prevents accumulation of testfiles
     def cleanup(self, target):
+        print("Looking for left-over testfiles from previous failed runs..")
         self.propfind(target)
         xml = self.responseBody.getvalue()
         uri = urlparse.urlparse(target)
@@ -583,7 +585,10 @@ class CurlTester(Tester):
         for match in iter:
             path = match.group(1)
             newuri = uri._replace(path=path)
+            print("Cleanup - deleting left-over testfile: " + newuri.geturl())
             self.delete(newuri.geturl())
+
+        print("All done")
     def perform(self, curl):
         """Return a TestResult object with information about what happened during the request"""
         result = TestResult(self.args.warning)
