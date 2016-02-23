@@ -42,7 +42,7 @@ import cgi
 import subprocess
 import re
 
-__version__ = "0.2.9"
+__version__ = "0.3.0"
 
 __MAX_RND__ = 99
 __TEST_FILENAME__ = "test_webdav_access_"
@@ -581,7 +581,9 @@ class CurlTester(Tester):
         xml = self.responseBody.getvalue()
         uri = urlparse.urlparse(target)
 
-        iter = re.finditer(re.escape("<D:href>") + "(" + re.escape(uri.path) + __TEST_FILENAME__ + "\d+(_moved)?" + ")" + re.escape("</D:href>"), xml)
+        iter = re.finditer(re.escape("<") + "[Dd]" + re.escape(":href>")
+               + "(" + re.escape(uri.path) + __TEST_FILENAME__ + "\d+(_moved)?" + ")"
+               + re.escape("</") + "[Dd]" + re.escape(":href>"), xml)
         for match in iter:
             path = match.group(1)
             newuri = uri._replace(path=path)

@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 
 Name:           nagios-plugins-webdav
-Version:        0.2.9
+Version:        0.3.0
 Release:        1%{?dist}
 Summary:        Nagios Plugin - check_webdav
 Group:          Applications/Internet
@@ -42,6 +42,8 @@ cp --preserve=timestamps src/check_webdav %{buildroot}%{_libdir}/nagios/plugins
 rm -rf %{buildroot}
 
 %changelog
+* Wed Feb 23 2016 Georgios Bitzes <georgios.bitzes@cern.ch> - 0.3.0
+- Improve detection of accumulated testfiles
 * Wed Feb 23 2016 Georgios Bitzes <georgios.bitzes@cern.ch> - 0.2.9
 - Fix automatic cleanup of accumulated testfiles
 * Wed Feb 23 2016 Georgios Bitzes <georgios.bitzes@cern.ch> - 0.2.8
