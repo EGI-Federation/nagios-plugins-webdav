@@ -42,7 +42,7 @@ import cgi
 import subprocess
 import re
 
-__version__ = "0.2.7"
+__version__ = "0.2.8"
 
 __MAX_RND__ = 99
 __TEST_FILENAME__ = "test_webdav_access_"
@@ -59,14 +59,12 @@ EX_OK              = 0
 EX_WARNING         = 1
 EX_CRITICAL        = 2
 EX_UNKNOWN         = 3
-EX_OK_PUTFAIL      = 4
-EX_WARNING_PUTFAIL = 5
 
 def code_to_str(code):
     if code == EX_CRITICAL:
         return "FAILURE"
     elif code == EX_WARNING:
-        return "SLOW"
+        return "WARNING"
     elif code == EX_OK:
         return "OK"
     elif code == EX_UNKNOWN:
@@ -189,14 +187,15 @@ def log(level, message, threshold=None):
 
 class SingleTest:
     """A class to help run a single test and produce the corresponding TestResult"""
-    def __init__(self, name, description, method, args, expected=None):
+    def __init__(self, name, description, method, args, expected=range(200, 300), critical=True):
         self.name = name
         self.description = description
         self.method = method
         self.args = args
         self.expected = expected
+        self.critical = critical
     def finalize(self, result):
-        result.setparams(self.name, self.description, expected_status=self.expected)
+        result.setparams(self.name, self.description, expected_status=self.expected, critical=self.critical)
         result.finalize()
     def run(self):
         result = self.method(*self.args)
@@ -240,26 +239,32 @@ class TestResult(object):
     def diagnostic(self, msg):
         self.messages.append(msg)
 
-    def setparams(self, name, description, expected_status=None):
+    def setparams(self, name, description, expected_status, critical):
         self.name = name
         self.description = description
         self.short_name = name.lower().replace(" ", "_").replace("-", "_")
         self.expected_status = expected_status
+        self.critical = critical
 
     def finalize(self):
+        if self.state != TestResult.STATE_NOT_RUN and self.elapsed >= self.warnthres:
+            self.diagnostic("Test is slow - took more than {0} seconds".format(self.warnthres))
+
         self.outcome = self.determine_outcome()
 
     def determine_outcome(self):
+        FAILURE = EX_CRITICAL
+        if not self.critical:
+            FAILURE = EX_WARNING
+
         if self.state == TestResult.STATE_NOT_RUN:
             return EX_UNKNOWN
         if self.state == TestResult.STATE_FAILED:
-            return EX_CRITICAL
+            return FAILURE
 
         assert self.state == TestResult.STATE_RUN
-        if self.expected_status != None and self.status != self.expected_status:
-            return EX_CRITICAL
-        elif (self.expected_status == None and (self.status < 200 or self.status >= 300)):
-            return EX_CRITICAL
+        if self.status not in self.expected_status:
+            return FAILURE
         elif self.elapsed >= self.warnthres:
             return EX_WARNING
         else:
@@ -267,7 +272,7 @@ class TestResult(object):
 
     def performance_data(self):
         # If a test fails, make nagios show an empty graph
-        if self.outcome == EX_CRITICAL or self.outcome == EX_UNKNOWN:
+        if self.outcome == EX_CRITICAL or self.outcome == EX_UNKNOWN or self.status not in self.expected_status:
             return ""
         return "{0}={1:.2f}s".format(self.short_name, self.elapsed)
 
@@ -295,12 +300,12 @@ class TestResult(object):
         for i in self.messages:
             output.write(add_prefix(i,indent))
 
-        if self.outcome == EX_CRITICAL:
+        if self.outcome == EX_CRITICAL or self.outcome == EX_WARNING:
             output.write(add_prefix("For guidance on troubleshooting a failing endpoint, please have a look at https://twiki.cern.ch/twiki/bin/view/LCG/HTTPTFSAMProbe", indent))
             output.write(add_prefix("Credentials:\n", indent))
             output.write(add_prefix(credentials, indent*2))
 
-        if (self.outcome == EX_CRITICAL or self.outcome == EX_UNKNOWN) and self.history:
+        if (self.outcome != EX_OK) and self.history:
             output.write(add_prefix("Server response: {0}\n".format(http_status_to_explanation(self.status)), indent))
             output.write(add_prefix("Debugging information: the history of all performed requests and "
                                     "received responses during the execution of this test follows.\n", indent))
@@ -321,16 +326,8 @@ class Tester(object):
             print(message, end="")
 
     def determine_exit_code(self, results):
-        putfail = False
-        for i in results:
-            if i.name == "FILE PUT" and i.outcome == EX_CRITICAL:
-                putfail = True
+        outcomes = [x.outcome for x in results if x.critical]
 
-        outcomes = [x.outcome for x in results]
-        if outcomes.count(EX_CRITICAL) == 1 and putfail:
-            if outcomes.count(EX_WARNING) == 0:
-                return EX_OK_PUTFAIL
-            return EX_WARNING_PUTFAIL
         if outcomes.count(EX_CRITICAL) > 0:
             return EX_CRITICAL
         if outcomes.count(EX_WARNING) > 0:
@@ -340,15 +337,11 @@ class Tester(object):
     def print_results(self, results):
         """Print all necessary output to stdout"""
         if self.global_outcome == EX_OK:
-            self.log(V_MINIMAL, "OK: all tests successful")
-        elif self.global_outcome == EX_OK_PUTFAIL:
-            self.log(V_MINIMAL, "OK: all read-only tests successful")
+            self.log(V_MINIMAL, "OK: the HTTP interface is usable")
         elif self.global_outcome == EX_WARNING:
-            self.log(V_MINIMAL, "WARNING: some tests slow")
-        elif self.global_outcome == EX_WARNING_PUTFAIL:
-            self.log(V_MINIMAL, "WARNING: some read-only tests slow")
+            self.log(V_MINIMAL, "WARNING: one or more tests have issues")
         elif self.global_outcome == EX_CRITICAL:
-            self.log(V_MINIMAL, "CRITICAL: some tests failed")
+            self.log(V_MINIMAL, "CRITICAL: one or more tests failed")
         elif self.global_outcome == EX_UNKNOWN:
             self.log(V_MINIMAL, "UNKNOWN: an unknown error occured")
 
@@ -403,11 +396,11 @@ class Tester(object):
             SingleTest("FILE MOVE", "MOVE file to another path", self.move, [target1, target2]),
             SingleTest("FILE HEAD", "HEAD on file", self.head, [target2]),
             SingleTest("FILE HEAD on non-existent", "HEAD on a path that does not exist, should return 404",
-                       self.head, [target1], expected=404),
+                       self.head, [target1], expected=[404]),
             SingleTest("FILE PROPFIND", "PROPFIND on file", self.propfind, [target2]),
             SingleTest("FILE DELETE", "DELETE on file", self.delete, [target2]),
             SingleTest("FILE DELETE on non-existent", "DELETE on a file that does not exist, should return 404",
-                       self.delete, [target1], expected=404)
+                       self.delete, [target1], expected=[404], critical=False)
         ]
 
         for t in tests: results.append(t.run())
@@ -427,7 +420,7 @@ class Tester(object):
             SingleTest("FILE OPTIONS", "OPTIONS on file", self.options, [standard_file]),
             SingleTest("FILE HEAD", "HEAD on file", self.head, [standard_file]),
             SingleTest("FILE HEAD on non-existent", "HEAD on a path that does not exist, should return 404",
-                       self.head,[standard_file+"does_not_exist"], expected=404),
+                       self.head,[standard_file+"does_not_exist"], expected=[404]),
             SingleTest("FILE PROPFIND", "PROPFIND on file", self.propfind, [standard_file]),
         ]
 
@@ -444,7 +437,7 @@ class Tester(object):
                         None, None)
         ]
 
-        for t in skipped: results.append(t.skip("PUT failed, running read-only tests"))
+        for t in skipped: results.append(t.skip("PUT failed, skipping"))
         return results
 
     def test(self):
@@ -464,11 +457,11 @@ class Tester(object):
             results.append(t.run())
 
         # initial PUT - do I have write access to the server?
-        put = SingleTest("FILE PUT", "PUT a file", self.put, [target1])
+        put = SingleTest("FILE PUT", "PUT a file", self.put, [target1], critical=False)
         results.append(put.run())
-        putfailed = results[-1].outcome == EX_CRITICAL or results[-1].outcome == EX_UNKNOWN
+        putok = results[-1].status >= 200 and results[-1].status < 300
 
-        if not putfailed:
+        if putok:
             results += self.run_put_ok_tests(target1, target2)
         else:
             results += self.run_put_failed_tests()
@@ -484,10 +477,6 @@ class Tester(object):
         if self.args.metric:
             self.publish_results(results)
 
-        if self.global_outcome == EX_OK_PUTFAIL:
-            return EX_OK
-        if self.global_outcome == EX_WARNING_PUTFAIL:
-            return EX_WARNING
         return self.global_outcome
 
 class CurlTester(Tester):
