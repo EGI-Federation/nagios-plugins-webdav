@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 ##############################################################################
-# Copyright (c) Members of the EGEE Collaboration. 2011.
+# Copyright (c) Members of the EGEE Collaboration. 2015.
 # See http://www.eu-egee.org/partners/ for details on the copyright
 # holders.
 #
@@ -18,9 +18,9 @@
 # limitations under the License.
 ##############################################################################
 #
-# NAME :        check_webdav_endpoint
+# NAME :        check_webdav
 #
-# DESCRIPTION : Checks the webdav interface to an endpoint
+# DESCRIPTION : Checks the webdav interface of an endpoint
 #
 # AUTHORS :     Georgios Bitzes <georgios.bitzes@cern.ch>
 #
@@ -42,7 +42,7 @@ import cgi
 import subprocess
 import re
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 
 __MAX_RND__ = 99
 __TEST_FILENAME__ = "test_webdav_access_"
@@ -97,6 +97,8 @@ def http_status_to_explanation(status):
 
 def add_prefix(string, prefix):
     """Returns a new string with the prefix string added before each line"""
+    if string is None: return None
+
     ss = StringIO.StringIO()
     for line in string.splitlines():
         ss.write(prefix + line + "\n")
@@ -522,8 +524,55 @@ class CurlTester(Tester):
         return curl
     def put(self, target):
         curl = self.getcurl(target)
-        curl.setopt(pycurl.POSTFIELDS, __TEST_FILE__)
-        curl.setopt(pycurl.CUSTOMREQUEST, "PUT")
+
+        # Sometimes, curl needs to rewind the sent data. The human way to deal
+        # with this is to set SEEKFUNCTION, but pycurl on SL6 does not
+        # yet support it.
+        # Repeat reader rewinds itself automatically once it reaches the end.
+        class RepeatReader:
+            def __init__(self, data):
+                self.pos = 0
+                self.data = data
+            def read(self, size):
+                ret = self.data[self.pos:self.pos+size]
+                self.pos=self.pos+size
+
+                # rewind?
+                if len(ret) == 0:
+                    self.pos = 0
+
+                return ret
+
+        curl.setopt(pycurl.UPLOAD, 1)
+        repeater = RepeatReader(__TEST_FILE__)
+        curl.setopt(pycurl.READFUNCTION, repeater.read)
+
+        # This is a pretty terrible hack: lib/transfer.c
+        # in the curl C source checks for the existence of
+        # POSTFIELDS - if it finds it, it thinks there is no need
+        # to rewind the data.
+        #
+        # POSTFIELDS is usually what you want to send in the body
+        # of a request, but since we're doing an UPLOAD, it's ignored.
+        #
+        # Without this, curl sees there's no SEEKFUNCTION defined
+        # and throws an error when it's unable to rewind the data.
+        # In our case, the read function rewinds itself automatically.
+        curl.setopt(pycurl.POSTFIELDS, "irrelevant string")
+
+        # Here is what the non-insane way to do this would look like - please
+        # change as soon as SEEKFUNCTION is available on all platforms.
+
+        # stringio = StringIO.StringIO(__TEST_FILE__)
+        # curl.setopt(pycurl.READFUNCTION, stringio.read)
+        # curl.setopt(pycurl.SEEKFUNCTION, stringio.seek)
+
+        # There's also the possibility to use POSTFIELDS and manually set the verb to PUT,
+        # but this does not send a 100-Continue.
+
+        # curl.setopt(pycurl.CUSTOMREQUEST, "PUT")
+        # curl.setopt(pycurl.CUSTOMREQUEST, "PUT")
+
         return self.perform(curl)
     def delete(self, target):
         # safety check: make sure we aren't deleting anything important
