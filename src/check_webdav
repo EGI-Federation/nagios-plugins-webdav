@@ -38,11 +38,12 @@ import StringIO
 import random
 import traceback
 import urlparse
+import urllib
 import cgi
 import subprocess
 import re
 
-__version__ = "0.3.1"
+__version__ = "0.3.4"
 
 __MAX_RND__ = 99
 __TEST_FILENAME__ = "test_webdav_access_"
@@ -159,6 +160,7 @@ def getargs():
                         "Necessary because of a bug in NSS that sometimes results in 'curl: (35) SSL connect error'")
     parser.add_argument('--tempcapath', type=str, default="/tmp/check-webdav_tempcapath",
                         help="The location to which the capath should be copied to. Only applies in case --no-crls is given.")
+    parser.add_argument('--sanitized-query-params', nargs='+', default=["token", "dpmtoken"])
 
     args = parser.parse_args()
 
@@ -481,6 +483,10 @@ class Tester(object):
 
         return self.global_outcome
 
+def sanitize(query, param):
+    if param in query:
+        query[param] = "sanitized"
+
 class CurlTester(Tester):
     def __init__(self, args):
         Tester.__init__(self, args)
@@ -651,6 +657,20 @@ class CurlTester(Tester):
             result.set(status, elapsed)
         except Exception, e:
             result.failure("Curl exception: " + str(e))
+
+        effective = curl.getinfo(pycurl.EFFECTIVE_URL)
+
+        # Print redirected URL after sanitizing sensitive token fields
+        if effective != curl.__mytarget:
+            url_parts = list(urlparse.urlparse(effective))
+            query = urlparse.parse_qs(url_parts[4])
+
+            for param in self.args.sanitized_query_params:
+                sanitize(query, param)
+
+            url_parts[4] = urllib.urlencode(query)
+            redir = urlparse.urlunparse(url_parts)
+            result.diagnostic("Redirection - effective URL: " + redir)
 
         result.sethistory(self.history.getvalue())
         result.target = curl.__mytarget
