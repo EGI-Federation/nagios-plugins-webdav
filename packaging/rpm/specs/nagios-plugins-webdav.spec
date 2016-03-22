@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 
 Name:           nagios-plugins-webdav
-Version:        0.3.3
+Version:        0.3.4
 Release:        1%{?dist}
 Summary:        Nagios Plugin - check_webdav
 Group:          Applications/Internet
@@ -42,6 +42,8 @@ cp --preserve=timestamps src/check_webdav %{buildroot}%{_libdir}/nagios/plugins
 rm -rf %{buildroot}
 
 %changelog
+* Tue Mar 22 2016 Georgios Bitzes <georgios.bitzes@cern.ch> - 0.3.4
+- Add no-cleanup flag, increase default failure timeout
 * Mon Mar 21 2016 Georgios Bitzes <georgios.bitzes@cern.ch> - 0.3.3
 - Sanitize sensitive URL parameters
 * Mon Mar 21 2016 Georgios Bitzes <georgios.bitzes@cern.ch> - 0.3.2

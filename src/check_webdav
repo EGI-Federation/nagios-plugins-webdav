@@ -149,7 +149,7 @@ def getargs():
     parser.add_argument('--capath', type=str, default="/etc/grid-security/certificates",
                         help="The certificate store to verify host credentials\n")
     parser.add_argument('-w', '--warning', type=int, default=10, help="Sets the warning threshold (seconds)\n")
-    parser.add_argument('-t', '--timeout', type=int, default=30, help="Sets the timeout threshold (seconds)\n")
+    parser.add_argument('-t', '--timeout', type=int, default=100, help="Sets the timeout threshold (seconds)\n")
     parser.add_argument('-m', '--metric', type=str, help="The metric prefix under which to publish the results in Nagios.\n"
                         "Results will not be published if it isn't specified.")
     parser.add_argument('-f', '--fqan', type=str, default="", help="The FQAN suffix to append to the end of the Nagios service name.\n")
@@ -161,6 +161,7 @@ def getargs():
     parser.add_argument('--tempcapath', type=str, default="/tmp/check-webdav_tempcapath",
                         help="The location to which the capath should be copied to. Only applies in case --no-crls is given.")
     parser.add_argument('--sanitized-query-params', nargs='+', default=["token", "dpmtoken"])
+    parser.add_argument('--no-cleanup', action='store_true', help="Do not perform a file cleanup at the end of the run")
 
     args = parser.parse_args()
 
@@ -475,7 +476,8 @@ class Tester(object):
         self.print_results(results)
 
         # do a cleanup, remove any files that might have been left over from a previous failed run
-        self.cleanup(self.path)
+        if not self.args.no_cleanup:
+            self.cleanup(self.path)
 
         # publish results to nagios
         if self.args.metric:
@@ -490,7 +492,6 @@ def sanitize(query, param):
 class CurlTester(Tester):
     def __init__(self, args):
         Tester.__init__(self, args)
-        self.insecure = False
     def getcurl(self, target):
         args = self.args
         curl = pycurl.Curl()
@@ -507,7 +508,6 @@ class CurlTester(Tester):
         curl.setopt(pycurl.CAPATH, args.capath)
         curl.__mytarget  = target # pycurl does not support getting the URL back, so let's improvise
         curl.setopt(pycurl.URL, target)
-        curl.setopt(pycurl.SSL_VERIFYPEER, not self.insecure)
 
         self.responseBody = StringIO.StringIO()
         curl.setopt(pycurl.WRITEFUNCTION, self.responseBody.write)
