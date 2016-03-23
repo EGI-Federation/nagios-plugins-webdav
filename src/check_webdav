@@ -43,7 +43,7 @@ import cgi
 import subprocess
 import re
 
-__version__ = "0.3.4"
+__version__ = "0.3.5"
 
 __MAX_RND__ = 99
 __TEST_FILENAME__ = "test_webdav_access_"
@@ -331,12 +331,16 @@ class Tester(object):
             print(message, end="")
 
     def determine_exit_code(self, results):
+        slow = [x.elapsed > self.args.warning for x in results]
         outcomes = [x.outcome for x in results if x.critical]
 
         if outcomes.count(EX_CRITICAL) > 0:
             return EX_CRITICAL
         if outcomes.count(EX_WARNING) > 0:
             return EX_WARNING
+        if True in slow:
+            return EX_WARNING
+
         return EX_OK
 
     def print_results(self, results):
@@ -344,7 +348,7 @@ class Tester(object):
         if self.global_outcome == EX_OK:
             self.log(V_MINIMAL, "OK: the HTTP interface is usable")
         elif self.global_outcome == EX_WARNING:
-            self.log(V_MINIMAL, "WARNING: one or more tests have issues")
+            self.log(V_MINIMAL, "WARNING: one or more tests are slow")
         elif self.global_outcome == EX_CRITICAL:
             self.log(V_MINIMAL, "CRITICAL: one or more tests failed")
         elif self.global_outcome == EX_UNKNOWN:
@@ -374,11 +378,6 @@ class Tester(object):
         for r in results:
             item = {}
             item["status"] = r.outcome
-
-            # mark a failed PUT as WARNING, not CRITICAL
-            if r.name == "FILE PUT" and r.outcome == EX_CRITICAL:
-                item["status"] = EX_WARNING
-
             item["host"] = urlparse.urlparse(self.args.uri).hostname
             item["details"] = r.long_output(printHTML=True)
             item["summary"] = r.short_output()
