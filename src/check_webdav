@@ -43,7 +43,7 @@ import cgi
 import subprocess
 import re
 
-__version__ = "0.3.5"
+__version__ = "0.3.7"
 
 __MAX_RND__ = 99
 __TEST_FILENAME__ = "test_webdav_access_"
@@ -60,16 +60,6 @@ EX_OK              = 0
 EX_WARNING         = 1
 EX_CRITICAL        = 2
 EX_UNKNOWN         = 3
-
-def code_to_str(code):
-    if code == EX_CRITICAL:
-        return "FAILURE"
-    elif code == EX_WARNING:
-        return "WARNING"
-    elif code == EX_OK:
-        return "OK"
-    elif code == EX_UNKNOWN:
-        return "UNKNOWN"
 
 def ensure_safe_path(path):
     # Before running a dangerous operation (ie delete), make sure the path contains __TEST_FILENAME__
@@ -155,13 +145,16 @@ def getargs():
     parser.add_argument('-f', '--fqan', type=str, default="", help="The FQAN suffix to append to the end of the Nagios service name.\n")
     parser.add_argument('--version', action='version', version=str(__version__))
 
-    parser.add_argument('-c', '--no-crls', action='store_true', help="Copies the capath to a temporary location (given by --tempcapath),"
-                        " while excluding Certificate Revocation Lists (all *.r0 files). "
+    parser.add_argument('-c', '--no-crls', action='store_true', help="Copies the capath to a temporary location (given by --tempcapath),\n"
+                        "while excluding Certificate Revocation Lists (all *.r0 files).\n"
                         "Necessary because of a bug in NSS that sometimes results in 'curl: (35) SSL connect error'")
     parser.add_argument('--tempcapath', type=str, default="/tmp/check-webdav_tempcapath",
-                        help="The location to which the capath should be copied to. Only applies in case --no-crls is given.")
-    parser.add_argument('--sanitized-query-params', nargs='+', default=["token", "dpmtoken"])
+                        help="The location to which the capath should be copied.\nOnly applies in case --no-crls is given.")
+    parser.add_argument('--sanitized-query-params', nargs='+', default=["token", "dpmtoken", "dcache-http-uuid"])
     parser.add_argument('--no-cleanup', action='store_true', help="Do not perform a file cleanup at the end of the run")
+    parser.add_argument('--wait-after-put', type=int, default=2, help="Wait this number of seconds after doing a PUT. \nRequired for certain"
+                                                                      " overloaded servers, it takes a while until the file is available,\n"
+                                                                      "otherwise you get an error. ")
 
     args = parser.parse_args()
 
@@ -258,18 +251,14 @@ class TestResult(object):
         self.outcome = self.determine_outcome()
 
     def determine_outcome(self):
-        FAILURE = EX_CRITICAL
-        if not self.critical:
-            FAILURE = EX_WARNING
-
         if self.state == TestResult.STATE_NOT_RUN:
             return EX_UNKNOWN
         if self.state == TestResult.STATE_FAILED:
-            return FAILURE
+            return EX_CRITICAL
 
         assert self.state == TestResult.STATE_RUN
         if self.status not in self.expected_status:
-            return FAILURE
+            return EX_CRITICAL
         elif self.elapsed >= self.warnthres:
             return EX_WARNING
         else:
@@ -281,10 +270,23 @@ class TestResult(object):
             return ""
         return "{0}={1:.2f}s".format(self.short_name, self.elapsed)
 
-    def short_output(self):
-        s = code_to_str(self.outcome)
-        out = "{0}: {1}".format(s, self.description)
+    def string_outcome(self):
         if self.outcome == EX_CRITICAL:
+            if self.critical:
+                return "CRITICAL"
+            else:
+                return "FAILURE - non critical"
+        elif self.outcome == EX_WARNING:
+            return "SLOW"
+        elif self.outcome == EX_OK:
+            return "OK"
+        elif self.outcome == EX_UNKNOWN:
+            return "UNKNOWN"
+
+    def short_output(self):
+        s = self.string_outcome()
+        out = "{0}: {1}".format(s, self.description)
+        if self.outcome == EX_CRITICAL and self.critical:
             out += " - {0}".format(http_status_to_explanation(self.status))
         return out
 
@@ -295,7 +297,7 @@ class TestResult(object):
             indent = " "*4
 
         output = StringIO.StringIO()
-        s = code_to_str(self.outcome)
+        s = self.string_outcome()
 
         output.write("{0:29} {1:5} ({2:<10} sec)   {3}\n".format(self.name, self.status, self.elapsed, s))
 
@@ -348,9 +350,13 @@ class Tester(object):
         if self.global_outcome == EX_OK:
             self.log(V_MINIMAL, "OK: the HTTP interface is usable")
         elif self.global_outcome == EX_WARNING:
-            self.log(V_MINIMAL, "WARNING: one or more tests are slow")
+            warnings = [x for x in results if x.outcome == EX_WARNING]
+            firstwarn = warnings[0].name if len(warnings) > 0 else '---'
+            self.log(V_MINIMAL, "WARNING: {0} tests are slow, starting with '{1}'".format(len(warnings), firstwarn))
         elif self.global_outcome == EX_CRITICAL:
-            self.log(V_MINIMAL, "CRITICAL: one or more tests failed")
+            criticals = [x for x in results if x.outcome == EX_CRITICAL]
+            firstcrit = criticals[0].name if len(criticals) > 0 else '---'
+            self.log(V_MINIMAL, "CRITICAL: {0} tests failed, starting with '{1}'".format(len(criticals), firstcrit))
         elif self.global_outcome == EX_UNKNOWN:
             self.log(V_MINIMAL, "UNKNOWN: an unknown error occured")
 
@@ -377,7 +383,12 @@ class Tester(object):
         publish = []
         for r in results:
             item = {}
-            item["status"] = r.outcome
+
+            outcome = r.outcome
+            if r.outcome == EX_CRITICAL and not r.critical:
+                outcome = EX_WARNING
+
+            item["status"] = outcome
             item["host"] = urlparse.urlparse(self.args.uri).hostname
             item["details"] = r.long_output(printHTML=True)
             item["summary"] = r.short_output()
@@ -466,6 +477,7 @@ class Tester(object):
         putok = results[-1].status >= 200 and results[-1].status < 300
 
         if putok:
+            time.sleep(self.args.wait_after_put)
             results += self.run_put_ok_tests(target1, target2)
         else:
             results += self.run_put_failed_tests()
@@ -576,7 +588,7 @@ class CurlTester(Tester):
         # but this does not send a 100-Continue.
 
         # curl.setopt(pycurl.CUSTOMREQUEST, "PUT")
-        # curl.setopt(pycurl.CUSTOMREQUEST, "PUT")
+        # curl.setopt(pycurl.POSTFIELDS, __TEST_FILE__)
 
         return self.perform(curl)
     def delete(self, target):
@@ -625,6 +637,7 @@ class CurlTester(Tester):
         result = self.perform(curl)
         if contents is not None and self.responseBody.getvalue() != contents:
             result.failure("ERROR: File contents are wrong!")
+            result.diagnostic("CONTENTS: " + self.responseBody.getvalue())
         return result
     # clean all residual testfiles in target directory that might have been
     # left by previous runs of this script.
