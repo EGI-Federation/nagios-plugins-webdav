@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 
 Name:           nagios-plugins-webdav
-Version:        0.3.7
+Version:        0.3.9
 Release:        1%{?dist}
 Summary:        Nagios Plugin - check_webdav
 Group:          Applications/Internet
@@ -14,6 +14,7 @@ Requires:       time
 Requires:       pycurl
 Requires:       python-GridMon
 Requires:       voms-clients3
+Requires:       nmap
 
 %description
 This package provides a nagios plugin to test the webdav interface of an endpoint.
@@ -23,8 +24,6 @@ operations to successfully pass this test.
 
 %prep
 %setup -q
-# %{!?__python2: %global __python2 /usr/bin/python2}
-# %{!?python2_sitelib: %global python2_sitelib %(%{__python2} -c "from distutils.sysconfig import get_python_lib; print(get_python_lib())")}
 
 %build
 
@@ -42,6 +41,10 @@ cp --preserve=timestamps src/check_webdav %{buildroot}%{_libdir}/nagios/plugins
 rm -rf %{buildroot}
 
 %changelog
+* Wed Apr 13 2016 Georgios Bitzes <georgios.bitzes@cern.ch> - 0.3.9
+- Bugfix, nmap would check the wrong ports
+* Tue Apr 12 2016 Georgios Bitzes <georgios.bitzes@cern.ch> - 0.3.8
+- Add TLS ciphers test
 * Tue Mar 29 2016 Georgios Bitzes <georgios.bitzes@cern.ch> - 0.3.7
 - Better error reporting, small delay after a PUT
 * Tue Mar 22 2016 Georgios Bitzes <georgios.bitzes@cern.ch> - 0.3.5

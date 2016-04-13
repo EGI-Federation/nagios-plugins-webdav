@@ -42,8 +42,9 @@ import urllib
 import cgi
 import subprocess
 import re
+import tempfile
 
-__version__ = "0.3.7"
+__version__ = "0.3.9"
 
 __MAX_RND__ = 99
 __TEST_FILENAME__ = "test_webdav_access_"
@@ -250,6 +251,11 @@ class TestResult(object):
 
         self.outcome = self.determine_outcome()
 
+    def is_slow(self):
+        if self.elapsed >= self.warnthres:
+            return True
+        return False
+
     def determine_outcome(self):
         if self.state == TestResult.STATE_NOT_RUN:
             return EX_UNKNOWN
@@ -259,7 +265,7 @@ class TestResult(object):
         assert self.state == TestResult.STATE_RUN
         if self.status not in self.expected_status:
             return EX_CRITICAL
-        elif self.elapsed >= self.warnthres:
+        elif self.is_slow():
             return EX_WARNING
         else:
             return EX_OK
@@ -323,6 +329,79 @@ class TestResult(object):
 
         return output.getvalue()
 
+def get_tls_ciphers(target):
+    """Returns a list of ciphers that the endpoint supports"""
+    uri = urlparse.urlparse(target)
+    port = uri.port
+    if not port: port = 443
+
+    # create temporary servicesdb file for nmap which contains the desired port
+    tmp = tempfile.mkstemp()[1]
+    with open(tmp, "w") as f:
+        f.write("https {0}/tcp 0.1".format(port))
+
+    process = subprocess.Popen(["nmap", "-Pn", "--script", "ssl-enum-ciphers",
+                                "--servicedb", tmp, "--port-ratio", "0", uri.hostname],
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    stdout, stderr = process.communicate()
+    os.remove(tmp)
+
+    ciphers = {}
+    parsing = False
+    protocol = None
+    for line in stdout.split("\n"):
+        if not line.startswith("|"): continue
+        line = line[1:].strip()
+
+        if line.startswith("TLSv"):
+            protocol = line
+        elif line.startswith("Ciphers"):
+            parsing = True
+        elif line.startswith("Compressors"):
+            parsing = False
+        elif line.startswith("TLS_") and parsing and protocol is not None:
+            if protocol not in ciphers:
+                ciphers[protocol] = []
+            ciphers[protocol].append(line)
+
+    return ciphers
+
+def is_cipher_blacklisted(cipher):
+    blacklist = ["_RC4_", "_NULL_"]
+    for b in blacklist:
+        if b in cipher:
+            return True
+    return False
+
+def test_tls_ciphers(target):
+    start = time.time()
+    ciphers = get_tls_ciphers(target)
+    end = time.time()
+
+    # if an endpoint only provides blacklisted ciphers, this test will fail
+    failure = True
+    for protocol in ciphers:
+        for cipher in ciphers[protocol]:
+            if not is_cipher_blacklisted(cipher):
+                failure = False
+
+    # much higher time limit
+    result = TestResult(600)
+    result.set("", end-start)
+
+    # test failed? print list of ciphers
+    if failure:
+        result.failure("Error - endpoint only accepts blacklisted ciphers.\nModern platforms (recent ubuntu) and clients (chrome, firefox) may have trouble connecting.")
+        diagnostic = StringIO.StringIO()
+        diagnostic.write("List of ciphers that the endpoint supports\n")
+        for protocol in ciphers:
+            diagnostic.write(protocol + "\n")
+            for cipher in ciphers[protocol]:
+                diagnostic.write("  " + cipher + "\n")
+
+        result.diagnostic(diagnostic.getvalue())
+    return result
+
 class Tester(object):
     def __init__(self, args):
         self.args = args
@@ -333,7 +412,7 @@ class Tester(object):
             print(message, end="")
 
     def determine_exit_code(self, results):
-        slow = [x.elapsed > self.args.warning for x in results]
+        slow = [x.is_slow() for x in results]
         outcomes = [x.outcome for x in results if x.critical]
 
         if outcomes.count(EX_CRITICAL) > 0:
@@ -350,9 +429,9 @@ class Tester(object):
         if self.global_outcome == EX_OK:
             self.log(V_MINIMAL, "OK: the HTTP interface is usable")
         elif self.global_outcome == EX_WARNING:
-            warnings = [x for x in results if x.outcome == EX_WARNING]
-            firstwarn = warnings[0].name if len(warnings) > 0 else '---'
-            self.log(V_MINIMAL, "WARNING: {0} tests are slow, starting with '{1}'".format(len(warnings), firstwarn))
+            slow = [x for x in results if x.is_slow()]
+            firstwarn = slow[0].name if len(slow) > 0 else '---'
+            self.log(V_MINIMAL, "WARNING: {0} tests are slow, starting with '{1}'".format(len(slow), firstwarn))
         elif self.global_outcome == EX_CRITICAL:
             criticals = [x for x in results if x.outcome == EX_CRITICAL]
             firstcrit = criticals[0].name if len(criticals) > 0 else '---'
@@ -463,6 +542,8 @@ class Tester(object):
 
         # declare read tests
         readtests = [
+            SingleTest("TLS CIPHERS", "Verifies the server provides a reasonable set of TLS ciphers",
+                        test_tls_ciphers, [self.path], expected=[""], critical=False),
             SingleTest("DIR HEAD", "HEAD on dir", self.head, [self.path]),
             SingleTest("DIR GET", "GET on dir", self.get, [self.path, None])
         ]
