@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 
 Name:           nagios-plugins-webdav
-Version:        0.3.9
+Version:        0.4.0
 Release:        1%{?dist}
 Summary:        Nagios Plugin - check_webdav
 Group:          Applications/Internet
@@ -41,6 +41,8 @@ cp --preserve=timestamps src/check_webdav %{buildroot}%{_libdir}/nagios/plugins
 rm -rf %{buildroot}
 
 %changelog
+* Mon May 02 2016 Georgios Bitzes <georgios.bitzes@cern.ch> - 0.4.0
+- Bugfix, skipped tests were triggering a slow warning
 * Wed Apr 13 2016 Georgios Bitzes <georgios.bitzes@cern.ch> - 0.3.9
 - Bugfix, nmap would check the wrong ports
 * Tue Apr 12 2016 Georgios Bitzes <georgios.bitzes@cern.ch> - 0.3.8
