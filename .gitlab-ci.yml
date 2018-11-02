@@ -1,5 +1,6 @@
 stages:
 - build
+- publish
 
 cc7:
   stage: build
@@ -12,3 +13,18 @@ cc7:
   artifacts:
     paths:
     - "$CI_JOB_NAME"
+
+rpms:
+  stage: publish
+  image: gitlab-registry.cern.ch/eos/quarkdb/build-image-cc7
+  dependencies:
+  - cc7
+  - fedora
+  script:
+   - for platform in cc7; do sudo -u stci -H packaging/repo-manager.py --action add --base /eos/project/s/storage-ci/www/nagios-plugins-webdav --ref ${CI_COMMIT_REF_NAME} --packages ${platform}/RPMS/* ${platform}/SRPMS/* ; done
+  tags:
+    - docker-cc7
+  retry: 2
+  only:
+    - branches
+    - tags
