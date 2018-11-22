@@ -2,7 +2,7 @@
 
 Name:           nagios-plugins-webdav
 Version:        0.4.0
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        Nagios Plugin - check_webdav
 Group:          Applications/Internet
 License:        ASL 2.0
@@ -13,7 +13,13 @@ BuildArch:      x86_64
 Requires:       time
 Requires:       pycurl
 Requires:       python-GridMon
+
+%if %{?rhel}%{!?rhel:0} >= 7
+Requires:       voms-clients
+%else
 Requires:       voms-clients3
+%endif
+
 Requires:       nmap
 
 %description
