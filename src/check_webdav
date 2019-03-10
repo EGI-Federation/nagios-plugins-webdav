@@ -355,14 +355,14 @@ def get_tls_ciphers(target):
 
         if line.startswith("TLSv"):
             protocol = line
-        elif line.startswith("Ciphers"):
+        elif line.lower().startswith("ciphers"):
             parsing = True
-        elif line.startswith("Compressors"):
+        elif line.lower().startswith("compressors"):
             parsing = False
         elif line.startswith("TLS_") and parsing and protocol is not None:
             if protocol not in ciphers:
                 ciphers[protocol] = []
-            ciphers[protocol].append(line)
+            ciphers[protocol].append(line.split(' ')[0])
 
     return ciphers
 
