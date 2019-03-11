@@ -1,8 +1,8 @@
 %global debug_package %{nil}
 
 Name:           nagios-plugins-webdav
-Version:        0.4.0
-Release:        2%{?dist}
+Version:        0.4.1
+Release:        1%{?dist}
 Summary:        Nagios Plugin - check_webdav
 Group:          Applications/Internet
 License:        ASL 2.0
@@ -47,6 +47,8 @@ cp --preserve=timestamps src/check_webdav %{buildroot}%{_libdir}/nagios/plugins
 rm -rf %{buildroot}
 
 %changelog
+* Mon Mar 11 2019 Georgios Bitzes <georgios.bitzes@cern.ch> - 0.4.1
+- Fix parsing of nmap ssl-enum-ciphers on CentOS7
 * Mon May 02 2016 Georgios Bitzes <georgios.bitzes@cern.ch> - 0.4.0
 - Bugfix, skipped tests were triggering a slow warning
 * Wed Apr 13 2016 Georgios Bitzes <georgios.bitzes@cern.ch> - 0.3.9
