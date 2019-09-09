@@ -44,7 +44,7 @@ import subprocess
 import re
 import tempfile
 
-__version__ = "0.4.1"
+__version__ = "0.4.2"
 
 __MAX_RND__ = 99
 __TEST_FILENAME__ = "test_webdav_access_"
@@ -686,7 +686,7 @@ class CurlTester(Tester):
 
         allows = None
         for line in self.responseHeader.getvalue().split("\n"):
-            if line.startswith("Allow:"):
+            if line.lower().startswith("allow:") or line.lower().startswith("access-control-allow-methods"):
                 allows = line
 
         if allows is None:

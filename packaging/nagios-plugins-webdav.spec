@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 
 Name:           nagios-plugins-webdav
-Version:        0.4.1
+Version:        0.4.2
 Release:        1%{?dist}
 Summary:        Nagios Plugin - check_webdav
 Group:          Applications/Internet
@@ -47,6 +47,8 @@ cp --preserve=timestamps src/check_webdav %{buildroot}%{_libdir}/nagios/plugins
 rm -rf %{buildroot}
 
 %changelog
+* Mon Sep 09 2019 Georgios Bitzes <georgios.bitzes@cern.ch> - 0.4.2
+- Support "access-control-allow-methods" in OPTIONS output for compatibility with dCache
 * Mon Mar 11 2019 Georgios Bitzes <georgios.bitzes@cern.ch> - 0.4.1
 - Fix parsing of nmap ssl-enum-ciphers on CentOS7
 * Mon May 02 2016 Georgios Bitzes <georgios.bitzes@cern.ch> - 0.4.0
