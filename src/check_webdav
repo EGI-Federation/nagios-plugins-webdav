@@ -219,6 +219,7 @@ class TestResult(object):
         self.messages = []
         self.history = None
         self.target = None
+        self.ipaddr = None
 
         self.status = 0
         self.elapsed = 0
@@ -309,6 +310,9 @@ class TestResult(object):
 
         if self.target:
             output.write(add_prefix("Target: " + self.target + "\n", indent))
+
+        if self.ipaddr:
+            output.write(add_prefix("Last resolved IP: " + self.ipaddr + "\n", indent))
 
         for i in self.messages:
             output.write(add_prefix(i,indent))
@@ -767,6 +771,7 @@ class CurlTester(Tester):
 
         result.sethistory(self.history.getvalue())
         result.target = curl.__mytarget
+        result.ipaddr = curl.getinfo(pycurl.PRIMARY_IP)
         return result
 
 def prepare_custom_capath(capath, tempcapath):
