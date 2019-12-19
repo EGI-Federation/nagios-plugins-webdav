@@ -151,6 +151,7 @@ def getargs():
                         "Necessary because of a bug in NSS that sometimes results in 'curl: (35) SSL connect error'")
     parser.add_argument('--tempcapath', type=str, default="/tmp/check-webdav_tempcapath",
                         help="The location to which the capath should be copied.\nOnly applies in case --no-crls is given.")
+    parser.add_argument('--fixed-content-length', action='store_true', help="Do not use chunked encoding during uploads, but rather a fixed Content-Length")
     parser.add_argument('--dynafed', action='store_true', help="Use this flag when testing against a dynafed instance")
     parser.add_argument('--sanitized-query-params', nargs='+', default=["token", "dpmtoken", "dcache-http-uuid"])
     parser.add_argument('--no-cleanup', action='store_true', help="Do not perform a file cleanup at the end of the run")
@@ -487,7 +488,7 @@ class Tester(object):
             self.log(V_DEBUG, "Exception text:  " + str(e) + "\n")
 
     def run_dynafed_tests(self, target1, target2):
-        """Run all 'put-succeeded' tests and return the results"""
+        """Run all 'put-succeeded-with-dynafed' tests and return the results"""
         results = []
         tests = [
             SingleTest("FILE GET", "GET file", self.get, [target1, __TEST_FILE__]),
@@ -576,7 +577,11 @@ class Tester(object):
             results.append(t.run())
 
         # initial PUT - do I have write access to the server?
-        put = SingleTest("FILE PUT", "PUT a file", self.put, [target1], critical=False)
+        if self.args.fixed_content_length:
+            put = SingleTest("FILE PUT", "PUT a file", self.putFixedString, [target1], critical=False)
+        else:
+            put = SingleTest("FILE PUT", "PUT a file (chunked encoding)", self.putChunked, [target1], critical=False)
+
         results.append(put.run())
         putok = results[-1].status >= 200 and results[-1].status < 300
 
@@ -647,7 +652,16 @@ class CurlTester(Tester):
         curl.setopt(pycurl.DEBUGFUNCTION, lambda x, y: debugfunction(self, x, y))
 
         return curl
-    def put(self, target):
+
+    def putFixedString(self, target):
+        # Do a put with a fixed string, which sends a fixed Content-Length.
+        # Useful for servers which may not support chunked encoding.
+        curl = self.getcurl(target)
+        curl.setopt(pycurl.CUSTOMREQUEST, "PUT")
+        curl.setopt(pycurl.POSTFIELDS, __TEST_FILE__)
+        return self.perform(curl)
+
+    def putChunked(self, target):
         curl = self.getcurl(target)
 
         # Sometimes, curl needs to rewind the sent data. The human way to deal
