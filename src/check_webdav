@@ -151,6 +151,7 @@ def getargs():
                         "Necessary because of a bug in NSS that sometimes results in 'curl: (35) SSL connect error'")
     parser.add_argument('--tempcapath', type=str, default="/tmp/check-webdav_tempcapath",
                         help="The location to which the capath should be copied.\nOnly applies in case --no-crls is given.")
+    parser.add_argument('--dynafed', action='store_true', help="Use this flag when testing against a dynafed instance")
     parser.add_argument('--sanitized-query-params', nargs='+', default=["token", "dpmtoken", "dcache-http-uuid"])
     parser.add_argument('--no-cleanup', action='store_true', help="Do not perform a file cleanup at the end of the run")
     parser.add_argument('--wait-after-put', type=int, default=2, help="Wait this number of seconds after doing a PUT. \nRequired for certain"
@@ -485,6 +486,24 @@ class Tester(object):
             self.log(V_DEBUG, "Error: could not publish passive result, an exception occured\n")
             self.log(V_DEBUG, "Exception text:  " + str(e) + "\n")
 
+    def run_dynafed_tests(self, target1, target2):
+        """Run all 'put-succeeded' tests and return the results"""
+        results = []
+        tests = [
+            SingleTest("FILE GET", "GET file", self.get, [target1, __TEST_FILE__]),
+            SingleTest("FILE OPTIONS", "OPTIONS on file", self.options, [target1]),
+            SingleTest("FILE HEAD", "HEAD on file", self.head, [target1]),
+            SingleTest("FILE HEAD on non-existent", "HEAD on a path that does not exist, should return 404",
+                       self.head, [target2], expected=[404]),
+            SingleTest("FILE PROPFIND", "PROPFIND on file", self.propfind, [target1]),
+            SingleTest("FILE DELETE", "DELETE on file", self.delete, [target1]),
+            SingleTest("FILE DELETE on non-existent", "DELETE on a file that does not exist, should return 404",
+                       self.delete, [target2], expected=[404], critical=False)
+        ]
+
+        for t in tests: results.append(t.run())
+        return results
+
     def run_put_ok_tests(self, target1, target2):
         """Run all 'put-succeeded' tests and return the results"""
         results = []
@@ -563,7 +582,11 @@ class Tester(object):
 
         if putok:
             time.sleep(self.args.wait_after_put)
-            results += self.run_put_ok_tests(target1, target2)
+
+            if not self.args.dynafed:
+                results += self.run_put_ok_tests(target1, target2)
+            else:
+                results += self.run_dynafed_tests(target1, target2)
         else:
             results += self.run_put_failed_tests()
 
