@@ -657,8 +657,9 @@ class CurlTester(Tester):
         # Do a put with a fixed string, which sends a fixed Content-Length.
         # Useful for servers which may not support chunked encoding.
         curl = self.getcurl(target)
-        curl.setopt(pycurl.CUSTOMREQUEST, "PUT")
         curl.setopt(pycurl.POSTFIELDS, __TEST_FILE__)
+        curl.setopt(pycurl.CUSTOMREQUEST, "PUT")
+        curl.setopt(pycurl.POST, 1)
         return self.perform(curl)
 
     def putChunked(self, target):
