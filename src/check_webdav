@@ -44,7 +44,7 @@ import subprocess
 import re
 import tempfile
 
-__version__ = "0.4.4"
+__version__ = "0.4.5"
 
 __MAX_RND__ = 99
 __TEST_FILENAME__ = "test_webdav_access_"
@@ -660,7 +660,7 @@ class CurlTester(Tester):
         curl.setopt(pycurl.POSTFIELDS, __TEST_FILE__)
         curl.setopt(pycurl.CUSTOMREQUEST, "PUT")
         curl.setopt(pycurl.POST, 1)
-        curl.setopt(pycurl.HTTPHEADER, ["Content-Type:", "Expect : 100-continue"])
+        curl.setopt(pycurl.HTTPHEADER, ["Content-Type:", "Expect: 100-continue"])
         return self.perform(curl)
 
     def putChunked(self, target):

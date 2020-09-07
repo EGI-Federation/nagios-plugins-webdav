@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 
 Name:           nagios-plugins-webdav
-Version:        0.4.4
+Version:        0.4.5
 Release:        1%{?dist}
 Summary:        Nagios Plugin - check_webdav
 Group:          Applications/Internet
@@ -47,8 +47,10 @@ cp --preserve=timestamps src/check_webdav %{buildroot}%{_libdir}/nagios/plugins
 rm -rf %{buildroot}
 
 %changelog
+* Mon Sep 7 2020 Georgios Bitzes <georgios.bitzes@cern.ch> - 0.4.5
+- Fix incorrect 101-continue header sent with --fixed-content-length
 * Wed Jul 15 2020 Georgios Bitzes <georgios.bitzes@cern.ch> - 0.4.4
-- Remove Content-Type, add 100-continue headers when --fixed-content-flag is provided.
+- Remove Content-Type, add 100-continue headers when --fixed-content-length is provided.
 * Mon Jan 06 2020 Georgios Bitzes <georgios.bitzes@cern.ch> - 0.4.3
 - Implement --fixed-content-length and --dynafed flags.
 - Show last contacted IP.
