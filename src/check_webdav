@@ -158,6 +158,7 @@ def getargs():
     parser.add_argument('--wait-after-put', type=int, default=2, help="Wait this number of seconds after doing a PUT. \nRequired for certain"
                                                                       " overloaded servers, it takes a while until the file is available,\n"
                                                                       "otherwise you get an error. ")
+    parser.add_argument('--skip-dir-test', action='store_true', help="Use this flag to skip the directory listing test")
 
     args = parser.parse_args()
 
@@ -574,7 +575,10 @@ class Tester(object):
 
         # run read tests
         for t in readtests:
-            results.append(t.run())
+            if self.args.skip_dir_test and "DIR" in t.name:
+	        pass
+            else:
+                results.append(t.run())
 
         # initial PUT - do I have write access to the server?
         if self.args.fixed_content_length:
