@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 
 Name:           nagios-plugins-webdav
-Version:        0.4.5
+Version:        0.4.6
 Release:        1%{?dist}
 Summary:        Nagios Plugin - check_webdav
 Group:          Applications/Internet
@@ -47,6 +47,8 @@ cp --preserve=timestamps src/check_webdav %{buildroot}%{_libdir}/nagios/plugins
 rm -rf %{buildroot}
 
 %changelog
+* Fri Mar 17 2023 Andrea Manzi <andrea.manzi@egi.eu> - 0.4.6
+- Add option to skip DIR test
 * Mon Sep 7 2020 Georgios Bitzes <georgios.bitzes@cern.ch> - 0.4.5
 - Fix incorrect 101-continue header sent with --fixed-content-length
 * Wed Jul 15 2020 Georgios Bitzes <georgios.bitzes@cern.ch> - 0.4.4

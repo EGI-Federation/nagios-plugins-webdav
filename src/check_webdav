@@ -44,7 +44,7 @@ import subprocess
 import re
 import tempfile
 
-__version__ = "0.4.5"
+__version__ = "0.4.6"
 
 __MAX_RND__ = 99
 __TEST_FILENAME__ = "test_webdav_access_"
