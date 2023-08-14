@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 
 Name:           nagios-plugins-webdav
-Version:        0.4.6
+Version:        0.4.7
 Release:        1%{?dist}
 Summary:        Nagios Plugin - check_webdav
 Group:          Applications/Internet
@@ -47,6 +47,8 @@ cp --preserve=timestamps src/check_webdav %{buildroot}%{_libdir}/nagios/plugins
 rm -rf %{buildroot}
 
 %changelog
+* Mon Aug 14 2023 Andrea Manzi <andrea.manzi@egi.eu> - 0.4.7
+- Default to ipv4 only, added option to disable it
 * Fri Mar 17 2023 Andrea Manzi <andrea.manzi@egi.eu> - 0.4.6
 - Add option to skip DIR test
 * Mon Sep 7 2020 Georgios Bitzes <georgios.bitzes@cern.ch> - 0.4.5
